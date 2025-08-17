@@ -12,5 +12,5 @@ class FlexiAttendSettings(frappe.model.document.Document):
             self.erpnext_base_url = site_url
         else:
             self.erpnext_base_url = ""
-            self.site_token = ""
+            # self.site_token = ""
 

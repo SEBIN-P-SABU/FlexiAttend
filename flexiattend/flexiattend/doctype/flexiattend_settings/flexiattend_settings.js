@@ -55,6 +55,64 @@ frappe.ui.form.on('FlexiAttend Settings', {
             d.$wrapper.find('.modal-footer .btn-secondary').css('background-color', '#f8d7da'); // Discard → light red
             d.$wrapper.find('.modal-footer .btn-secondary').css('color', '#721c24'); // Discard text → dark red
         }, 100);
+    },
+    
+    
+
+
+     refresh: function(frm) {
+        frm.add_custom_button(__('Update FlexiAttend Token'), function() {
+            let d = new frappe.ui.Dialog({
+                title: `<span style="color:#721c24;">Update FlexiAttend Token</span>`,
+                fields: [
+                    {
+                        label: 'FlexiAttend Token',
+                        fieldname: 'flexiattend_token',
+                        fieldtype: 'Data',
+                        default: frm.doc.flexiattend_token || ''
+                    }
+                ],
+                primary_action_label: __('Update'),
+                primary_action(values) {
+                    frm.set_value('flexiattend_token', values.flexiattend_token);
+                    frm.save().then(() => {
+                        frappe.show_alert({
+                            message: __('FlexiAttend Token updated successfully'),
+                            indicator: 'blue'
+                        });
+                        d.hide();
+                    });
+                },
+                secondary_action_label: __('Discard'),
+                secondary_action() {
+                    frappe.show_alert({
+                        message: __('Updating FlexiAttend Token cancelled'),
+                        indicator: 'red'
+                    });
+                    d.hide();
+                }
+            });
+
+            d.show();
+
+            setTimeout(() => {
+                // Update button → green
+                d.$wrapper.find('.modal-footer .btn-primary')
+                    .css({
+                        'background-color': '#28a745',
+                        'border-color': '#28a745',
+                        'color': 'white'
+                    });
+
+                // Discard button → light red background, dark red text
+                d.$wrapper.find('.modal-footer .btn-secondary')
+                    .css({
+                        'background-color': '#f8d7da',
+                        'border-color': '#f8d7da',
+                        'color': '#721c24'
+                    });
+            }, 100);
+        }, __('Actions'));
     }
 });
 

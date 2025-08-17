@@ -9,11 +9,10 @@
   "basic_details_section",
   "flexiattend_token",
   "integrating_user",
-  "generate_site_token",
   "column_break_cnnd",
   "erpnext_base_url",
-  "site_token",
-  "implement_site_bot"
+  "generate_site_token",
+  "site_token"
  ],
  "fields": [
   {
@@ -57,22 +56,18 @@
    "label": "Generate Site Token"
   },
   {
-   "default": "0",
-   "fieldname": "implement_site_bot",
-   "fieldtype": "Check",
-   "label": "Implement Site Bot"
-  },
-  {
    "fieldname": "flexiattend_token",
    "fieldtype": "Data",
-   "label": "FlexiAttend Token"
+   "label": "FlexiAttend Token",
+   "mandatory_depends_on": "eval: doc.enable_flexiattend;",
+   "read_only_depends_on": "eval:!(doc.__islocal);"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2025-08-17 06:50:15.232468",
+ "modified": "2025-08-17 08:51:56.098891",
  "modified_by": "Administrator",
  "module": "FlexiAttend",
  "name": "FlexiAttend Settings",
