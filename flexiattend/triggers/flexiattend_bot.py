@@ -1,15 +1,16 @@
 # Copyright (c) 2025, Sebin P Sabu and contributors
 # For license information, please see license.txt
 
-from telegram import Update, ReplyKeyboardMarkup, KeyboardButton
+from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove, BotCommand
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ConversationHandler, ContextTypes
 import requests
 import frappe
+import asyncio
 
 
 def run():
     app.run_polling()
-
+    
 # ---- HELPER FUNCTIONS ---- #
 def get_erp_settings():
     """Read dynamic values from FlexiAttend Settings"""
@@ -32,7 +33,6 @@ def get_endpoints():
 settings = get_erp_settings()
 BOT_TOKEN = settings["BOT_TOKEN"]
 SITE_TOKEN = settings["SITE_TOKEN"]
-
 endpoints = get_endpoints()
 VALIDATE_EMP_ENDPOINT = endpoints["VALIDATE_EMP_ENDPOINT"]
 CREATE_CHECKIN_ENDPOINT = endpoints["CREATE_CHECKIN_ENDPOINT"]
@@ -42,9 +42,12 @@ SITE_VERIFICATION, EMPLOYEE_ID, MENU, LOCATION = range(4)
 
 # ---- BOT HANDLERS ---- #
 
-# 1️⃣ Site verification
+# 1️⃣ /start -> site verification
 async def verify_site(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Enter your 12-character site code to verify your site:")
+    await update.message.reply_text(
+        "Enter your site code to verify your site:",
+        reply_markup=ReplyKeyboardRemove()
+    )
     return SITE_VERIFICATION
 
 async def check_site_code(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -56,11 +59,6 @@ async def check_site_code(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return EMPLOYEE_ID
 
 # 2️⃣ Employee ID input
-async def employee_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Please enter your Employee ID:")
-    return EMPLOYEE_ID
-
-# 3️⃣ Verify Employee ID
 async def get_employee_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
     emp_id = update.message.text.strip()
     context.user_data['employee_id'] = emp_id
@@ -68,9 +66,8 @@ async def get_employee_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         r = requests.post(VALIDATE_EMP_ENDPOINT, data={"employee_id": emp_id})
         resp = r.json()
-        print("Validate response:", resp)  # Debug
+        print("Validate response:", resp)
 
-        # Access nested message
         resp_msg = resp.get("message", {})
         if isinstance(resp_msg, dict):
             status = resp_msg.get("status")
@@ -90,7 +87,7 @@ async def get_employee_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("✅ Employee verified. Choose an option:", reply_markup=reply_markup)
     return MENU
 
-# 4️⃣ Menu choice
+# 3️⃣ Menu choice
 async def menu_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     choice = update.message.text
     if choice not in ["Check-In", "Check-Out"]:
@@ -99,12 +96,13 @@ async def menu_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     context.user_data['log_type'] = "IN" if choice == "Check-In" else "OUT"
 
+    # Send location button only now
     location_keyboard = [[KeyboardButton("Share Location 📍", request_location=True)]]
     reply_markup = ReplyKeyboardMarkup(location_keyboard, one_time_keyboard=True, resize_keyboard=True)
     await update.message.reply_text("Please share your location:", reply_markup=reply_markup)
     return LOCATION
 
-# 5️⃣ Handle location
+# 4️⃣ Handle location
 async def location_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message.location:
         await update.message.reply_text("❌ Please share your location using the button.")
@@ -136,57 +134,52 @@ async def location_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             message_text = resp.get("message", "")
 
         if status == "success":
-            await update.message.reply_text(f"✅ {message_text}")
+            await update.message.reply_text(f"✅ {message_text}", reply_markup=ReplyKeyboardRemove())
         else:
-            await update.message.reply_text(f"❌ Failed: {message_text}")
+            await update.message.reply_text(f"❌ Failed: {message_text}", reply_markup=ReplyKeyboardRemove())
     except Exception as e:
-        await update.message.reply_text(f"⚠️ Error: {str(e)}")
+        await update.message.reply_text(f"⚠️ Error: {str(e)}", reply_markup=ReplyKeyboardRemove())
 
+    context.user_data.clear()
     return ConversationHandler.END
 
-# 6️⃣ Ignore text outside flow
-async def ignore_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("❌ Please use the buttons to interact with the bot.")
+# 5️⃣ Cancel command
+async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("❌ Operation cancelled. You can start again with /start.", reply_markup=ReplyKeyboardRemove())
+    context.user_data.clear()
+    return ConversationHandler.END
 
+# 6️⃣ Ignore unexpected text
 async def ignore_unexpected(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.message and not update.message.location:
-        await update.message.reply_text("❌ Please use the buttons only. Attachments or typing are not allowed.")
+    if update.message:
+        await update.message.reply_text("❌ Please use the buttons only.", reply_markup=ReplyKeyboardRemove())
 
 # ---- BOT SETUP ---- #
-app = ApplicationBuilder().token(BOT_TOKEN).build()
+async def set_commands_on_startup(app):
+    await app.bot.set_my_commands([
+        BotCommand("start", "Start the FlexiAttend Bot"),
+        BotCommand("cancel", "Cancel current operation")
+    ])
 
-# conv_handler = ConversationHandler(
-#     entry_points=[CommandHandler("start", verify_site)],
-#     states={
-#         SITE_VERIFICATION: [MessageHandler(filters.TEXT & ~filters.COMMAND, check_site_code)],
-#         EMPLOYEE_ID: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_employee_id)],
-#         MENU: [MessageHandler(filters.TEXT & ~filters.COMMAND, menu_choice)],
-#         LOCATION: [MessageHandler(filters.LOCATION, location_handler)]
-#     },
-#     fallbacks=[]
-# )
-
-# app.add_handler(conv_handler)
+app = ApplicationBuilder().token(BOT_TOKEN).post_init(set_commands_on_startup).build()
 
 conv_handler = ConversationHandler(
-    entry_points=[
-        CommandHandler("start", verify_site),
-        CommandHandler("employee_id", employee_id)
-    ],
+    entry_points=[CommandHandler("start", verify_site)],
     states={
         SITE_VERIFICATION: [MessageHandler(filters.TEXT & ~filters.COMMAND, check_site_code)],
         EMPLOYEE_ID: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_employee_id)],
         MENU: [MessageHandler(filters.TEXT & ~filters.COMMAND, menu_choice)],
         LOCATION: [MessageHandler(filters.LOCATION, location_handler)],
     },
-    fallbacks=[MessageHandler(filters.ALL, ignore_unexpected)]
+    fallbacks=[
+        CommandHandler("cancel", cancel),
+        MessageHandler(filters.ALL & ~filters.COMMAND, ignore_unexpected)
+    ]
 )
 
 app.add_handler(conv_handler)
-# app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, ignore_text))
-# app.add_handler(MessageHandler(filters.ALL, ignore_unexpected))
 
-# app.run_polling()
-# ---- ALLOW DIRECT RUNNING WITH PYTHON3 ---- #
+# ---- RUN BOT ---- #
 if __name__ == "__main__":
+    asyncio.run(set_commands_on_startup(app))
     app.run_polling()

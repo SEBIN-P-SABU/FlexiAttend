@@ -17,21 +17,20 @@ frappe.ui.form.on('FlexiAttend Settings', {
             primary_action_label: 'Confirm',
             primary_action(values) {
                 // Generate 12-character random alphanumeric token (uppercase)
-                let tokenPart = Array.from({length: 12}, () => 
+                let token_part_left = Array.from({length: 12}, () => 
                     Math.floor(Math.random() * 36).toString(36).toUpperCase()
                 ).join('');
 
-                // Generate 12-digit random number
-                let numberPart = '';
-                for (let i = 0; i < 12; i++) {
-                    numberPart += Math.floor(Math.random() * 10);
-                }
+                // Generate 12-character random alphanumeric string for the right part
+                let token_part_right = Array.from({length: 12}, () => 
+                    Math.floor(Math.random() * 36).toString(36).toUpperCase()
+                ).join('');
 
                 // Combine both parts
-                let finalToken = `${tokenPart}:${numberPart}`;
+                 let final_token = `${token_part_left}:${token_part_right}`;
 
                 // Set the token in your field
-                frm.set_value('site_token', finalToken);
+                frm.set_value('site_token', final_token);
 
                 // Save automatically
                 frm.save().then(() => {

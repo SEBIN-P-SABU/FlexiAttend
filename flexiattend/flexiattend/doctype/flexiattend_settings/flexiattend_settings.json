@@ -6,7 +6,7 @@
  "engine": "InnoDB",
  "field_order": [
   "enable_flexiattend",
-  "basic_details_section",
+  "basic_configurations_section",
   "flexiattend_token",
   "integrating_user",
   "column_break_cnnd",
@@ -22,12 +22,6 @@
    "label": "Enable FlexiAttend"
   },
   {
-   "depends_on": "eval: doc.enable_flexiattend ;",
-   "fieldname": "basic_details_section",
-   "fieldtype": "Section Break",
-   "label": "Basic Details"
-  },
-  {
    "fieldname": "column_break_cnnd",
    "fieldtype": "Column Break"
   },
@@ -40,7 +34,7 @@
   {
    "fieldname": "erpnext_base_url",
    "fieldtype": "Data",
-   "label": "ERPNext Base URL",
+   "label": "Site Base URL",
    "read_only": 1
   },
   {
@@ -61,13 +55,19 @@
    "label": "FlexiAttend Token",
    "mandatory_depends_on": "eval: doc.enable_flexiattend;",
    "read_only_depends_on": "eval:!(doc.__islocal);"
+  },
+  {
+   "depends_on": "eval: doc.enable_flexiattend ;",
+   "fieldname": "basic_configurations_section",
+   "fieldtype": "Section Break",
+   "label": "Basic Configurations"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2025-08-17 08:51:56.098891",
+ "modified": "2025-08-17 10:00:03.367642",
  "modified_by": "Administrator",
  "module": "FlexiAttend",
  "name": "FlexiAttend Settings",
