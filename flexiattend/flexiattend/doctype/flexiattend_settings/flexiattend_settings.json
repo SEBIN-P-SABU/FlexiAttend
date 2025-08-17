@@ -7,7 +7,7 @@
  "field_order": [
   "enable_flexiattend",
   "basic_details_section",
-  "bot_token",
+  "flexiattend_token",
   "integrating_user",
   "generate_site_token",
   "column_break_cnnd",
@@ -27,11 +27,6 @@
    "fieldname": "basic_details_section",
    "fieldtype": "Section Break",
    "label": "Basic Details"
-  },
-  {
-   "fieldname": "bot_token",
-   "fieldtype": "Password",
-   "label": "FlexiAttend Token"
   },
   {
    "fieldname": "column_break_cnnd",
@@ -66,13 +61,18 @@
    "fieldname": "implement_site_bot",
    "fieldtype": "Check",
    "label": "Implement Site Bot"
+  },
+  {
+   "fieldname": "flexiattend_token",
+   "fieldtype": "Data",
+   "label": "FlexiAttend Token"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2025-08-17 05:40:14.992034",
+ "modified": "2025-08-17 06:50:15.232468",
  "modified_by": "Administrator",
  "module": "FlexiAttend",
  "name": "FlexiAttend Settings",

@@ -1,14 +1,17 @@
+# Copyright (c) 2025, Sebin P Sabu and contributors
+# For license information, please see license.txt
+
 import frappe
 from frappe import _
 
 @frappe.whitelist(allow_guest=True)
 def validate_employee(employee_id=None):
-    """Validate Employee exists by document name"""
+    """Validate Employee exists by document name and status"""
     if not employee_id:
         return {"status": "error", "message": _("Employee ID missing")}
 
     # Use exact document name
-    if not frappe.db.exists("Employee", employee_id):
+    if not frappe.db.exists("Employee", {"name": employee_id, "status": "Active"}):
         return {"status": "error", "message": _("Invalid Employee ID")}
 
     return {"status": "success", "message": _(f"Employee {employee_id} exists")}

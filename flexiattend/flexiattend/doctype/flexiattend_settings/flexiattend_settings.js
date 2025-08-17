@@ -49,7 +49,7 @@ frappe.ui.form.on('FlexiAttend Settings', {
 
         d.show();
 
-        // Apply button colors after showing the dialog
+        // Apply button colors
         setTimeout(() => {
             d.$wrapper.find('.modal-footer .btn-primary').css('background-color', '#28a745'); // Confirm → green
             d.$wrapper.find('.modal-footer .btn-secondary').css('background-color', '#f8d7da'); // Discard → light red
