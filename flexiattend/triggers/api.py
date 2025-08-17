@@ -32,7 +32,7 @@ def create_employee_checkin(employee_id, log_type, latitude=None, longitude=None
         "employee": employee_id,  # document name
         "log_type": log_type,     # "IN" or "OUT"
         "time": frappe.utils.now_datetime(),
-        "device_id": "TelegramBot",
+        "device_id": "FlexiAttend",
         "latitude": latitude,
         "longitude": longitude
     })

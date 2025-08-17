@@ -1,6 +1,6 @@
 app_name = "flexiattend"
 app_title = "FlexiAttend"
-app_publisher = "Tagline:"
+app_publisher = "Sebin P Sabu"
 app_description = "🌟 FlexiAttend – Smart, Flexible Attendance Tracking"
 app_email = "sebinpsabu900@gmail.com"
 app_license = "mit"

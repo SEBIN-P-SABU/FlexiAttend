@@ -1,22 +1,78 @@
 {
  "actions": [],
  "allow_rename": 1,
- "creation": "2025-08-17 04:16:56.420222",
+ "creation": "2025-08-17 04:27:52.044680",
  "doctype": "DocType",
  "engine": "InnoDB",
  "field_order": [
-  "section_break_v7tv"
+  "enable_flexiattend",
+  "basic_details_section",
+  "bot_token",
+  "integrating_user",
+  "generate_site_token",
+  "column_break_cnnd",
+  "erpnext_base_url",
+  "site_token",
+  "implement_site_bot"
  ],
  "fields": [
   {
-   "fieldname": "section_break_v7tv",
-   "fieldtype": "Section Break"
+   "default": "0",
+   "fieldname": "enable_flexiattend",
+   "fieldtype": "Check",
+   "label": "Enable FlexiAttend"
+  },
+  {
+   "depends_on": "eval: doc.enable_flexiattend ;",
+   "fieldname": "basic_details_section",
+   "fieldtype": "Section Break",
+   "label": "Basic Details"
+  },
+  {
+   "fieldname": "bot_token",
+   "fieldtype": "Password",
+   "label": "FlexiAttend Token"
+  },
+  {
+   "fieldname": "column_break_cnnd",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "integrating_user",
+   "fieldtype": "Link",
+   "label": "Integrating User",
+   "options": "User"
+  },
+  {
+   "fieldname": "erpnext_base_url",
+   "fieldtype": "Data",
+   "label": "ERPNext Base URL",
+   "read_only": 1
+  },
+  {
+   "fieldname": "site_token",
+   "fieldtype": "Data",
+   "label": "Site Token",
+   "mandatory_depends_on": "eval: doc.enable_flexiattend ;",
+   "read_only": 1
+  },
+  {
+   "fieldname": "generate_site_token",
+   "fieldtype": "Button",
+   "label": "Generate Site Token"
+  },
+  {
+   "default": "0",
+   "fieldname": "implement_site_bot",
+   "fieldtype": "Check",
+   "label": "Implement Site Bot"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
+ "issingle": 1,
  "links": [],
- "modified": "2025-08-17 04:16:56.420222",
+ "modified": "2025-08-17 05:40:14.992034",
  "modified_by": "Administrator",
  "module": "FlexiAttend",
  "name": "FlexiAttend Settings",
@@ -26,10 +82,8 @@
    "create": 1,
    "delete": 1,
    "email": 1,
-   "export": 1,
    "print": 1,
    "read": 1,
-   "report": 1,
    "role": "System Manager",
    "share": 1,
    "write": 1
