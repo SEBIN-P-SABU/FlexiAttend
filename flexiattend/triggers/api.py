@@ -11,7 +11,7 @@ def validate_employee(employee_id=None):
         return {"status": "error", "message": _("Employee ID missing")}
 
     # Use exact document name
-    if not frappe.db.exists("Employee", {"name": employee_id, "status": "Active"}):
+    if not frappe.db.exists("Employee", {"name": employee_id, "status": "Active", "custom_add_employee_to_flexiattend": 1}):
         return {"status": "error", "message": _("Invalid Employee ID")}
 
     return {"status": "success", "message": _(f"Employee {employee_id} exists")}
