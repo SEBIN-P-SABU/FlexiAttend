@@ -8,7 +8,7 @@
   "columns": 0,
   "default": null,
   "depends_on": null,
-  "description": null,
+  "description": "Only employees with this checked can perform check-in/check-out through the FlexiAttend App.",
   "docstatus": 0,
   "doctype": "Custom Field",
   "dt": "Employee",
