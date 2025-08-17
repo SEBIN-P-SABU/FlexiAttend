@@ -6,14 +6,14 @@ from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, fil
 import requests
 import frappe
 import asyncio
-
+import base64
 
 def run():
     app.run_polling()
     
+
 # ---- HELPER FUNCTIONS ---- #
 def get_erp_settings():
-    """Read dynamic values from FlexiAttend Settings"""
     settings = frappe.get_single("FlexiAttend Settings")
     return {
         "BOT_TOKEN": settings.flexiattend_token,
@@ -96,13 +96,13 @@ async def menu_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     context.user_data['log_type'] = "IN" if choice == "Check-In" else "OUT"
 
-    # Send location button only now
+    # Send location button
     location_keyboard = [[KeyboardButton("Share Location 📍", request_location=True)]]
     reply_markup = ReplyKeyboardMarkup(location_keyboard, one_time_keyboard=True, resize_keyboard=True)
     await update.message.reply_text("Please share your location:", reply_markup=reply_markup)
     return LOCATION
 
-# 4️⃣ Handle location
+# 4️⃣ Handle location & send check-in with attachments
 async def location_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message.location:
         await update.message.reply_text("❌ Please share your location using the button.")
@@ -113,15 +113,28 @@ async def location_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lat = update.message.location.latitude
     lon = update.message.location.longitude
 
+    attachments = context.user_data.get("attachments", [])
+
+    # Convert attachments to base64
+    encoded_attachments = []
+    for att in attachments:
+        file_id = att["file_id"]
+        file_name = att["file_name"]
+        file_obj = await context.bot.get_file(file_id)
+        file_bytes = await file_obj.download_as_bytearray()
+        encoded = base64.b64encode(file_bytes).decode()
+        encoded_attachments.append({"filename": file_name, "filedata": encoded})
+
     payload = {
         "employee_id": emp_id,
         "log_type": log_type,
         "latitude": lat,
-        "longitude": lon
+        "longitude": lon,
+        "attachments": encoded_attachments
     }
 
     try:
-        r = requests.post(CREATE_CHECKIN_ENDPOINT, data=payload)
+        r = requests.post(CREATE_CHECKIN_ENDPOINT, json=payload)
         print("Create Checkin response:", r.text)
         resp = r.json()
 
@@ -143,16 +156,76 @@ async def location_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
     return ConversationHandler.END
 
-# 5️⃣ Cancel command
+## 5️⃣ Capture attachments during the process (documents & all photos)
+# 5️⃣ Capture attachments during the process
+async def handle_attachments(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    settings = frappe.get_single("FlexiAttend Settings")
+    attachments_enabled = getattr(settings, "enable_attachment_feature_in_checkin", False)
+
+    if not attachments_enabled:
+        await update.message.reply_text("⚠️ Attachment feature is disabled. File will not be saved.")
+        return
+
+    if "attachments" not in context.user_data:
+        context.user_data["attachments"] = []
+
+    current_count = len(context.user_data["attachments"])
+    MAX_IMAGES = 3
+
+    new_files = []
+
+    # Handle documents
+    if update.message.document:
+        if current_count >= MAX_IMAGES:
+            await update.message.reply_text(f"❌ Maximum {MAX_IMAGES} images allowed per check-in.")
+            return
+        doc = update.message.document
+        context.user_data["attachments"].append({"file_id": doc.file_id, "file_name": doc.file_name})
+        print(f"[INFO] Document '{doc.file_name}' received. Total attachments: {len(context.user_data['attachments'])}")
+        await update.message.reply_text(f"✅ Document '{doc.file_name}' received and will be attached.")
+        return
+
+    # Handle photos (attach only one version per photo)
+    elif update.message.photo:
+        if current_count >= MAX_IMAGES:
+            await update.message.reply_text(f"❌ Maximum {MAX_IMAGES} images allowed per check-in.")
+            return
+
+        # Take the **last one in the list**, which is usually highest resolution
+        file_id = update.message.photo[-1].file_id
+        file_name = f"photo_{current_count + 1}.jpg"
+
+        context.user_data["attachments"].append({"file_id": file_id, "file_name": file_name})
+        new_files.append(file_name)
+        current_count += 1
+
+        print(f"[INFO] Photo received (file_id={file_id}). Total attachments: {current_count}")
+        await update.message.reply_text(f"✅ Photo received and will be attached ({current_count}/{MAX_IMAGES})")
+        return
+
+    else:
+        await update.message.reply_text("❌ Unsupported attachment type.")
+
+
+
+
+# 6️⃣ Cancel command
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("❌ Operation cancelled. You can start again with /start.", reply_markup=ReplyKeyboardRemove())
     context.user_data.clear()
     return ConversationHandler.END
 
-# 6️⃣ Ignore unexpected text
+# 7️⃣ Ignore unexpected text (commented old validation for reference)
 async def ignore_unexpected(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message:
-        await update.message.reply_text("❌ Please use the buttons only.", reply_markup=ReplyKeyboardRemove())
+        # # Old validation (commented)
+        # if update.message:
+        #     await update.message.reply_text("❌ Please use the buttons only.", reply_markup=ReplyKeyboardRemove())
+        # New logic: only warn if user types text instead of sharing location
+        if context.user_data.get('log_type') and update.message.text != "/cancel":
+            await update.message.reply_text("❌ Please share your location using the button.")
+        else:
+            await update.message.reply_text("❌ Please use the buttons only.")
 
 # ---- BOT SETUP ---- #
 async def set_commands_on_startup(app):
@@ -169,7 +242,10 @@ conv_handler = ConversationHandler(
         SITE_VERIFICATION: [MessageHandler(filters.TEXT & ~filters.COMMAND, check_site_code)],
         EMPLOYEE_ID: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_employee_id)],
         MENU: [MessageHandler(filters.TEXT & ~filters.COMMAND, menu_choice)],
-        LOCATION: [MessageHandler(filters.LOCATION, location_handler)],
+        LOCATION: [
+            MessageHandler(filters.LOCATION, location_handler),
+            MessageHandler(filters.PHOTO | filters.Document.ALL, handle_attachments)
+        ],
     },
     fallbacks=[
         CommandHandler("cancel", cancel),
