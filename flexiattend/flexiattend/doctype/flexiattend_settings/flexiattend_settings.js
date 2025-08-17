@@ -16,23 +16,15 @@ frappe.ui.form.on('FlexiAttend Settings', {
             ],
             primary_action_label: 'Confirm',
             primary_action(values) {
-                // Generate 12-character random alphanumeric token (uppercase)
                 let token_part_left = Array.from({length: 12}, () => 
                     Math.floor(Math.random() * 36).toString(36).toUpperCase()
                 ).join('');
-
-                // Generate 12-character random alphanumeric string for the right part
                 let token_part_right = Array.from({length: 12}, () => 
                     Math.floor(Math.random() * 36).toString(36).toUpperCase()
                 ).join('');
+                let final_token = `${token_part_left}:${token_part_right}`;
 
-                // Combine both parts
-                 let final_token = `${token_part_left}:${token_part_right}`;
-
-                // Set the token in your field
                 frm.set_value('site_token', final_token);
-
-                // Save automatically
                 frm.save().then(() => {
                     frappe.show_alert({message: __('New Site Token Generated and Saved'), indicator: 'green'});
                 });
@@ -48,18 +40,15 @@ frappe.ui.form.on('FlexiAttend Settings', {
 
         d.show();
 
-        // Apply button colors
         setTimeout(() => {
-            d.$wrapper.find('.modal-footer .btn-primary').css('background-color', '#28a745'); // Confirm → green
-            d.$wrapper.find('.modal-footer .btn-secondary').css('background-color', '#f8d7da'); // Discard → light red
-            d.$wrapper.find('.modal-footer .btn-secondary').css('color', '#721c24'); // Discard text → dark red
+            d.$wrapper.find('.modal-footer .btn-primary').css('background-color', '#28a745');
+            d.$wrapper.find('.modal-footer .btn-secondary').css('background-color', '#f8d7da');
+            d.$wrapper.find('.modal-footer .btn-secondary').css('color', '#721c24');
         }, 100);
     },
-    
-    
 
-
-     refresh: function(frm) {
+    refresh: function(frm) {
+        // Update FlexiAttend Token button
         frm.add_custom_button(__('Update FlexiAttend Token'), function() {
             let d = new frappe.ui.Dialog({
                 title: `<span style="color:#721c24;">Update FlexiAttend Token</span>`,
@@ -75,19 +64,13 @@ frappe.ui.form.on('FlexiAttend Settings', {
                 primary_action(values) {
                     frm.set_value('flexiattend_token', values.flexiattend_token);
                     frm.save().then(() => {
-                        frappe.show_alert({
-                            message: __('FlexiAttend Token updated successfully'),
-                            indicator: 'blue'
-                        });
+                        frappe.show_alert({message: __('FlexiAttend Token updated successfully'), indicator: 'blue'});
                         d.hide();
                     });
                 },
                 secondary_action_label: __('Discard'),
                 secondary_action() {
-                    frappe.show_alert({
-                        message: __('Updating FlexiAttend Token cancelled'),
-                        indicator: 'red'
-                    });
+                    frappe.show_alert({message: __('Updating FlexiAttend Token cancelled'), indicator: 'red'});
                     d.hide();
                 }
             });
@@ -95,23 +78,39 @@ frappe.ui.form.on('FlexiAttend Settings', {
             d.show();
 
             setTimeout(() => {
-                // Update button → green
-                d.$wrapper.find('.modal-footer .btn-primary')
-                    .css({
-                        'background-color': '#28a745',
-                        'border-color': '#28a745',
-                        'color': 'white'
-                    });
-
-                // Discard button → light red background, dark red text
-                d.$wrapper.find('.modal-footer .btn-secondary')
-                    .css({
-                        'background-color': '#f8d7da',
-                        'border-color': '#f8d7da',
-                        'color': '#721c24'
-                    });
+                d.$wrapper.find('.modal-footer .btn-primary').css({'background-color': '#28a745','border-color': '#28a745','color': 'white'});
+                d.$wrapper.find('.modal-footer .btn-secondary').css({'background-color': '#f8d7da','border-color': '#f8d7da','color': '#721c24'});
             }, 100);
         }, __('Actions'));
+
+        // Toggle Attachment Feature Button
+        const render_attachment_toggle = () => {
+            // Remove previous toggle button if exists
+            frm.page.remove_inner_button('Enable Attachment Feature in CheckIn');
+            frm.page.remove_inner_button('Disable Attachment Feature in CheckIn');
+
+            if (frm.doc.enable_attachment_feature_in_employee_checkin) {
+                // Show Disable button
+                frm.add_custom_button(__('Disable Attachment Feature in CheckIn'), () => {
+                    frm.set_value('enable_attachment_feature_in_employee_checkin', 0);
+                    frm.save().then(() => {
+                        frappe.show_alert({message: __('Attachment Feature disabled in CheckIn'), indicator: 'red'});
+                        render_attachment_toggle();
+                    });
+                }, __('Actions'));
+            } else {
+                // Show Enable button
+                frm.add_custom_button(__('Enable Attachment Feature in CheckIn'), () => {
+                    frm.set_value('enable_attachment_feature_in_employee_checkin', 1);
+                    frm.save().then(() => {
+                        frappe.show_alert({message: __('Attachment Feature enabled in CheckIn'), indicator: 'green'});
+                        render_attachment_toggle();
+                    });
+                }, __('Actions'));
+            }
+        };
+
+        // Render the toggle button on refresh
+        render_attachment_toggle();
     }
 });
-
