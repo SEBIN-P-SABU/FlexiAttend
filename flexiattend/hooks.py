@@ -147,11 +147,11 @@ app_license = "mit"
 
 # Scheduled Tasks
 # ---------------
-scheduler_events = {
-    "long": [
-        "flexiattend.triggers.flexiattend_bot.start_bot"
-    ]
-}
+# scheduler_events = {
+#     "long": [
+#         "flexiattend.triggers.flexiattend_bot.start_bot"
+#     ]
+# }
 
 # scheduler_events = {
 # 	"all": [
