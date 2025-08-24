@@ -184,52 +184,62 @@ async def ignore_unexpected(update, context, user_data):
 
 # ---- WEBHOOK ENTRYPOINT ---- #
 @frappe.whitelist(allow_guest=True)
-def webhook(**kwargs):
+def webhook():
+    """
+    Receives raw JSON POST from Telegram and passes it to the bot handlers.
+    """
+    import json
+    import asyncio
+    from telegram import Update
+
     if not ENABLE_FLEXIATTEND:
         return "FlexiAttend Bot disabled"
 
-    raw_update = frappe.local.form_dict.get("update")
-    frappe.log_error(f"Webhook payload: {raw_update}", "FlexiAttend Bot Debug")
-    if not raw_update:
-        return "No update"
-
     try:
-        update = Update.de_json(json.loads(raw_update), bot=bot)
+        # Read raw JSON from request body
+        raw_update = frappe.local.request.get_data(as_text=True)
+        if not raw_update:
+            frappe.log_error(f"Webhook payload: None", "FlexiAttend Bot Debug")
+            return "No update"
 
-        # Ignore updates without message
-        if not hasattr(update, "message") or not update.message:
-            frappe.log_error(f"Update without message: {raw_update}", "FlexiAttend Bot Debug")
-            return "No message to process"
+        update_json = json.loads(raw_update)
 
+        # Log payload for debug
+        frappe.log_error(f"Webhook payload: {update_json}", "FlexiAttend Bot Debug")
+
+        # Convert to Telegram Update object
+        update = Update.de_json(update_json, bot=bot)
+
+        # Get chat_id and user_data storage
         chat_id = update.message.chat.id
         if not hasattr(frappe.local, "user_data_store"):
             frappe.local.user_data_store = {}
         user_data = frappe.local.user_data_store.setdefault(chat_id, {})
         context = DummyContext(bot)
 
+        # Async loop
         loop = asyncio.get_event_loop()
         state = user_data.get('state')
 
-        # Handle /cancel anytime
+        # Handle commands /start and /cancel
         if update.message.text == "/cancel":
             loop.run_until_complete(cancel(update, context, user_data))
-        # /start command always verifies site
         elif update.message.text == "/start":
             loop.run_until_complete(verify_site(update, context, user_data))
-        # Attachment/location support
+        # Handle location/attachments
         elif state == LOCATION:
             if update.message.location:
                 loop.run_until_complete(location_handler(update, context, user_data))
             else:
                 loop.run_until_complete(handle_attachments(update, context, user_data))
-        # MENU and other states
+        # Handle MENU and EMPLOYEE_ID states
         elif state == MENU:
             loop.run_until_complete(menu_choice(update, context, user_data))
         elif state == EMPLOYEE_ID:
             loop.run_until_complete(get_employee_id(update, context, user_data))
         elif state == SITE_VERIFICATION:
             loop.run_until_complete(check_site_code(update, context, user_data))
-        # Fallback for any other message
+        # Fallback for unexpected messages
         else:
             loop.run_until_complete(ignore_unexpected(update, context, user_data))
 
@@ -238,6 +248,7 @@ def webhook(**kwargs):
     except Exception as e:
         frappe.log_error(f"Webhook error: {str(e)}", "FlexiAttend Bot")
         return "Error"
+
 
 
 
@@ -585,7 +596,7 @@ def webhook(**kwargs):
 
 
 
-# @@@@@@@@@@@@@@@@@@@@@@@@@@@@ - FOR LOCAL SERVER - @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+# # @@@@@@@@@@@@@@@@@@@@@@@@@@@@ - FOR LOCAL SERVER - @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
 # from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove, BotCommand
 # from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ConversationHandler, ContextTypes
 # import requests
@@ -865,8 +876,8 @@ def webhook(**kwargs):
 
 
 
-####@@@@@@@@@@@@@@@@@@@@@@@@@@@@@###################@@@@@@@@@@@@@@@@@@@@@@@@@@@
-# ---- WEBHOOK ENTRYPOINT ---- #
+# ###@@@@@@@@@@@@@@@@@@@@@@@@@@@@@###################@@@@@@@@@@@@@@@@@@@@@@@@@@@
+# ### ---- WEBHOOK ENTRYPOINT ---- #
 # @frappe.whitelist(allow_guest=True)
 # def webhook(**kwargs):
 #     """Called by Telegram webhook when an update is received"""
