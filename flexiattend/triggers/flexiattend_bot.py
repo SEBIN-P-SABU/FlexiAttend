@@ -1,218 +1,440 @@
 # Copyright (c) 2025, Sebin P Sabu and contributors
 # For license information, please see license.txt
 
-
-# Copyright (c) 2025, Sebin P Sabu and contributors
-# For license information, please see license.txt
-
-from telegram import Update, Bot, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove, BotCommand
 import frappe
-import requests
+import json
 import asyncio
 import base64
-import json
+import requests
+from telegram import Bot, Update, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
 
-# ---- HELPER FUNCTIONS ---- #
+# ---- GLOBAL SETTINGS ---- #
 def get_erp_settings():
-    # Use guest session to prevent SessionStopped
-    frappe.set_user("Guest")
     settings = frappe.get_single("FlexiAttend Settings")
     return {
         "BOT_TOKEN": settings.flexiattend_token,
         "ERP_URL": settings.erpnext_base_url,
         "SITE_TOKEN": settings.site_token,
-        "ENABLE_FLEXIATTEND": getattr(settings, "enable_flexiattend", False),
-        "MAX_ATTACHMENTS": getattr(settings, "maximum_file_attachments", 5),
-        "ATTACHMENT_ENABLED": getattr(settings, "enable_attachment_feature_in_employee_checkin", False)
+        "ATTACHMENTS_ENABLED": getattr(settings, "enable_attachment_feature_in_employee_checkin", False),
+        "MAX_ATTACHMENTS": getattr(settings, "maximum_file_attachments", 5)
     }
 
 settings = get_erp_settings()
 BOT_TOKEN = settings["BOT_TOKEN"]
 SITE_TOKEN = settings["SITE_TOKEN"]
-ENABLE_FLEXIATTEND = settings["ENABLE_FLEXIATTEND"]
+ATTACHMENTS_ENABLED = settings["ATTACHMENTS_ENABLED"]
 MAX_ATTACHMENTS = settings["MAX_ATTACHMENTS"]
-ATTACHMENT_ENABLED = settings["ATTACHMENT_ENABLED"]
-
-VALIDATE_EMP_ENDPOINT = f"{settings['ERP_URL']}/api/method/flexiattend.triggers.api.validate_employee"
-CREATE_CHECKIN_ENDPOINT = f"{settings['ERP_URL']}/api/method/flexiattend.triggers.api.create_employee_checkin"
-
 bot = Bot(BOT_TOKEN)
+
+endpoints = {
+    "VALIDATE_EMP_ENDPOINT": f"{settings['ERP_URL']}/api/method/flexiattend.triggers.api.validate_employee",
+    "CREATE_CHECKIN_ENDPOINT": f"{settings['ERP_URL']}/api/method/flexiattend.triggers.api.create_employee_checkin"
+}
 
 # ---- CONVERSATION STATES ---- #
 SITE_VERIFICATION, EMPLOYEE_ID, MENU, LOCATION = range(4)
 
-# ---- DUMMY CONTEXT ---- #
-class DummyContext:
-    def __init__(self, bot):
-        self.bot = bot
-        self.user_data = {}
+# ---- HELPER FUNCTIONS ---- #
+def get_user_data(chat_id):
+    """Return user session data stored in frappe.local."""
+    if not hasattr(frappe.local, "user_data_store"):
+        frappe.local.user_data_store = {}
+    return frappe.local.user_data_store.setdefault(chat_id, {})
+
+async def fetch_file_base64(file_id):
+    """Download a Telegram file and return as base64 string."""
+    file_obj = await bot.get_file(file_id)
+    file_bytes = await file_obj.download_as_bytearray()
+    return base64.b64encode(file_bytes).decode()
+
+# ---- WEBHOOK ---- #
+@frappe.whitelist(allow_guest=True)
+def webhook():
+    try:
+        raw_update = frappe.local.request.get_data(as_text=True)
+        if not raw_update:
+            return "No update"
+
+        update_json = json.loads(raw_update)
+        chat_id = update_json.get("message", {}).get("chat", {}).get("id")
+        text = update_json.get("message", {}).get("text")
+        frappe.log_error(f"Webhook payload: {{'chat_id': {chat_id}, 'text': '{text}'}}", "FlexiAttend Bot Debug")
+
+        update = Update.de_json(update_json, bot)
+        user_data = get_user_data(chat_id)
+        state = user_data.get("state")
+        loop = asyncio.get_event_loop()
+
+        # Command: /cancel
+        if text == "/cancel":
+            return loop.run_until_complete(cancel(update, user_data))
+
+        # Command: /start
+        elif text == "/start":
+            return loop.run_until_complete(verify_site(update, user_data))
+
+        # SITE VERIFICATION
+        elif state == SITE_VERIFICATION:
+            return loop.run_until_complete(check_site_code(update, user_data))
+
+        # EMPLOYEE ID
+        elif state == EMPLOYEE_ID:
+            return loop.run_until_complete(get_employee_id(update, user_data))
+
+        # MENU CHOICE
+        elif state == MENU:
+            return loop.run_until_complete(menu_choice(update, user_data))
+
+        # LOCATION / ATTACHMENTS
+        elif state == LOCATION:
+            if update.message.location:
+                return loop.run_until_complete(location_handler(update, user_data))
+            else:
+                return loop.run_until_complete(handle_attachments(update, user_data))
+
+        # FALLBACK
+        else:
+            return loop.run_until_complete(ignore_unexpected(update, user_data))
+
+    except Exception as e:
+        frappe.log_error(str(e)[:140], "FlexiAttend Bot")
+        return "Error"
 
 # ---- HANDLER FUNCTIONS ---- #
-async def verify_site(update, context, user_data):
-    await context.bot.send_message(update.message.chat.id, 
-                                   "Enter your site token to verify your site:", 
-                                   reply_markup=ReplyKeyboardRemove())
+async def verify_site(update, user_data):
     user_data['state'] = SITE_VERIFICATION
+    await update.message.reply_text(
+        "Enter your site code to verify your site:",
+        reply_markup=ReplyKeyboardRemove()
+    )
+    return SITE_VERIFICATION
 
-async def check_site_code(update, context, user_data):
+async def check_site_code(update, user_data):
     code = update.message.text.strip()
     if code != SITE_TOKEN:
-        await context.bot.send_message(update.message.chat.id, "❌ Invalid site code. Try again:")
-        return
-    await context.bot.send_message(update.message.chat.id, "✅ Site verified! Please enter your Employee ID:")
+        await update.message.reply_text("❌ Invalid site code. Try again:")
+        return SITE_VERIFICATION
     user_data['state'] = EMPLOYEE_ID
+    await update.message.reply_text("✅ Site verified! Please enter your Employee ID:")
+    return EMPLOYEE_ID
 
-async def get_employee_id(update, context, user_data):
+async def get_employee_id(update, user_data):
     emp_id = update.message.text.strip()
     user_data['employee_id'] = emp_id
     try:
-        r = requests.post(VALIDATE_EMP_ENDPOINT, data={"employee_id": emp_id})
+        r = requests.post(endpoints["VALIDATE_EMP_ENDPOINT"], data={"employee_id": emp_id})
         resp = r.json()
         status = resp.get("status") or resp.get("message", {}).get("status")
         if status != "success":
-            await context.bot.send_message(update.message.chat.id, "❌ Employee not found. Enter again:")
-            return
+            await update.message.reply_text("❌ Employee not found. Enter again:")
+            return EMPLOYEE_ID
     except Exception as e:
-        await context.bot.send_message(update.message.chat.id, f"⚠️ Error verifying employee: {str(e)}")
-        return
+        await update.message.reply_text(f"⚠️ Error verifying employee: {str(e)}")
+        return EMPLOYEE_ID
 
-    menu_keyboard = [["Check-In", "Check-Out"]]
-    reply_markup = ReplyKeyboardMarkup(menu_keyboard, one_time_keyboard=True, resize_keyboard=True)
-    await context.bot.send_message(update.message.chat.id, "✅ Employee verified. Choose an option:", reply_markup=reply_markup)
     user_data['state'] = MENU
+    keyboard = [["Check-In", "Check-Out"]]
+    reply_markup = ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True)
+    await update.message.reply_text("✅ Employee verified. Choose an option:", reply_markup=reply_markup)
+    return MENU
 
-async def menu_choice(update, context, user_data):
+async def menu_choice(update, user_data):
     choice = update.message.text
     if choice not in ["Check-In", "Check-Out"]:
-        await context.bot.send_message(update.message.chat.id, "❌ Please use the buttons only.")
-        return
+        await update.message.reply_text("❌ Please use the buttons only.")
+        return MENU
     user_data['log_type'] = "IN" if choice == "Check-In" else "OUT"
-
-    location_keyboard = [[KeyboardButton("Share Location 📍", request_location=True)]]
-    reply_markup = ReplyKeyboardMarkup(location_keyboard, one_time_keyboard=True, resize_keyboard=True)
-    await context.bot.send_message(update.message.chat.id, "Please share your location:", reply_markup=reply_markup)
     user_data['state'] = LOCATION
+    keyboard = [[KeyboardButton("Share Location 📍", request_location=True)]]
+    reply_markup = ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True)
+    await update.message.reply_text("Please share your location:", reply_markup=reply_markup)
+    return LOCATION
 
-# ---- Attachments ---- #
-async def handle_attachments(update, context, user_data):
-    if not ATTACHMENT_ENABLED:
-        await context.bot.send_message(update.message.chat.id, "⚠️ Attachment feature is disabled. File will not be saved.")
+async def location_handler(update, user_data):
+    if not update.message.location:
+        await update.message.reply_text("❌ Please share your location using the button.")
+        return LOCATION
+
+    # Prepare attachments in base64
+    attachments = []
+    for att in user_data.get("attachments", []):
+        try:
+            encoded = await fetch_file_base64(att["file_id"])
+            attachments.append({"filename": att["file_name"], "filedata": encoded})
+        except Exception as e:
+            frappe.log_error(f"Failed to fetch attachment: {str(e)}", "FlexiAttend Bot Debug")
+
+    payload = {
+        "employee_id": user_data['employee_id'],
+        "log_type": user_data['log_type'],
+        "latitude": update.message.location.latitude,
+        "longitude": update.message.location.longitude,
+        "attachments": attachments
+    }
+
+    try:
+        r = requests.post(endpoints["CREATE_CHECKIN_ENDPOINT"], json=payload)
+        resp = r.json()
+        msg = resp.get("message", "")
+        status = resp.get("status", "error")
+        if status == "success":
+            await update.message.reply_text(f"✅ {msg}", reply_markup=ReplyKeyboardRemove())
+        else:
+            await update.message.reply_text(f"❌ Failed: {msg}", reply_markup=ReplyKeyboardRemove())
+    except Exception as e:
+        await update.message.reply_text(f"⚠️ Error: {str(e)}", reply_markup=ReplyKeyboardRemove())
+
+    user_data.clear()
+    return "END"
+
+async def handle_attachments(update, user_data):
+    if not ATTACHMENTS_ENABLED:
+        await update.message.reply_text("⚠️ Attachment feature is disabled.")
         return
 
     if "attachments" not in user_data:
         user_data["attachments"] = []
 
-    current_count = len(user_data["attachments"])
+    count = len(user_data["attachments"])
+    if count >= MAX_ATTACHMENTS:
+        await update.message.reply_text(f"❌ Maximum {MAX_ATTACHMENTS} attachments reached.")
+        return
 
     if update.message.document:
-        if current_count >= MAX_ATTACHMENTS:
-            await context.bot.send_message(update.message.chat.id, f"❌ Maximum {MAX_ATTACHMENTS} files allowed.")
-            return
         doc = update.message.document
         user_data["attachments"].append({"file_id": doc.file_id, "file_name": doc.file_name})
-        await context.bot.send_message(update.message.chat.id, f"✅ Document '{doc.file_name}' received.")
-        return
+        await update.message.reply_text(f"✅ Document '{doc.file_name}' received and will be attached.")
 
     elif update.message.photo:
-        if current_count >= MAX_ATTACHMENTS:
-            await context.bot.send_message(update.message.chat.id, f"❌ Maximum {MAX_ATTACHMENTS} photos allowed.")
-            return
         file_id = update.message.photo[-1].file_id
-        file_name = f"photo_{current_count+1}.jpg"
-        user_data["attachments"].append({"file_id": file_id, "file_name": file_name})
-        await context.bot.send_message(update.message.chat.id, f"✅ Photo received ({current_count+1}/{MAX_ATTACHMENTS})")
-        return
+        user_data["attachments"].append({"file_id": file_id, "file_name": f"photo_{count+1}.jpg"})
+        await update.message.reply_text(f"✅ Photo received and will be attached ({count+1}/{MAX_ATTACHMENTS})")
 
     else:
-        await context.bot.send_message(update.message.chat.id, "❌ Unsupported attachment type.")
+        await update.message.reply_text("❌ Unsupported attachment type.")
 
-# ---- Location ---- #
-async def location_handler(update, context, user_data):
-    if not update.message.location:
-        await context.bot.send_message(update.message.chat.id, "❌ Please share your location using the button.")
-        return
-
-    emp_id = user_data['employee_id']
-    log_type = user_data['log_type']
-    lat = update.message.location.latitude
-    lon = update.message.location.longitude
-    attachments = user_data.get("attachments", [])
-
-    encoded_attachments = []
-    for att in attachments:
-        file_obj = await context.bot.get_file(att["file_id"])
-        file_bytes = await file_obj.download_as_bytearray()
-        encoded_attachments.append({
-            "filename": att["file_name"],
-            "filedata": base64.b64encode(file_bytes).decode()
-        })
-
-    payload = {
-        "employee_id": emp_id,
-        "log_type": log_type,
-        "latitude": lat,
-        "longitude": lon,
-        "attachments": encoded_attachments
-    }
-
-    try:
-        r = requests.post(CREATE_CHECKIN_ENDPOINT, json=payload)
-        resp = r.json()
-        status = resp.get("status") or resp.get("message", {}).get("status")
-        message_text = resp.get("message") or resp.get("message", {}).get("message", "")
-        if status == "success":
-            await context.bot.send_message(update.message.chat.id, f"✅ {message_text}", reply_markup=ReplyKeyboardRemove())
-        else:
-            await context.bot.send_message(update.message.chat.id, f"❌ Failed: {message_text}", reply_markup=ReplyKeyboardRemove())
-    except Exception as e:
-        await context.bot.send_message(update.message.chat.id, f"⚠️ Error: {str(e)}", reply_markup=ReplyKeyboardRemove())
-
+async def cancel(update, user_data):
+    await update.message.reply_text("❌ Operation cancelled. Start again with /start.", reply_markup=ReplyKeyboardRemove())
     user_data.clear()
+    return "END"
 
-# ---- Cancel ---- #
-async def cancel(update, context, user_data):
-    await context.bot.send_message(update.message.chat.id, "❌ Operation cancelled. You can start again with /start.", reply_markup=ReplyKeyboardRemove())
-    user_data.clear()
+async def ignore_unexpected(update, user_data):
+    await update.message.reply_text("❌ Please use the buttons only.")
 
-# ---- Ignore unexpected ---- #
-async def ignore_unexpected(update, context, user_data):
-    if update.message and update.message.text != "/cancel":
-        if user_data.get('log_type'):
-            await context.bot.send_message(update.message.chat.id, "❌ Please share your location using the button.")
-        else:
-            await context.bot.send_message(update.message.chat.id, "❌ Please use the buttons only.")
 
-import frappe
-from telegram import Bot, Update
-import json
+################ WORKED WEBHOOK CODE ########################
 
-@frappe.whitelist(allow_guest=True)
-def webhook():
-    try:
-        update_json = frappe.local.form_dict
-        # Keep only the message text and chat id for logging
-        log_payload = {
-            "chat_id": update_json.get("message", {}).get("chat", {}).get("id"),
-            "text": update_json.get("message", {}).get("text")
-        }
-        frappe.log_error(f"Webhook payload: {json.dumps(log_payload)}", "FlexiAttend Bot Debug")
+# # Copyright (c) 2025, Sebin P Sabu and contributors
+# # For license information, please see license.txt
 
-        # Initialize your bot
-        bot = Bot("8466502184:AAFcBkWBFm31dqy-1iTZoILnX3YO59v65Qo")
+# from telegram import Update, Bot, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove, BotCommand
+# import frappe
+# import requests
+# import asyncio
+# import base64
+# import json
 
-        # Process Telegram update safely
-        update = Update.de_json(update_json, bot)
-        chat_id = update.message.chat.id
-        text = update.message.text
+# # ---- HELPER FUNCTIONS ---- #
+# def get_erp_settings():
+#     # Use guest session to prevent SessionStopped
+#     frappe.set_user("Guest")
+#     settings = frappe.get_single("FlexiAttend Settings")
+#     return {
+#         "BOT_TOKEN": settings.flexiattend_token,
+#         "ERP_URL": settings.erpnext_base_url,
+#         "SITE_TOKEN": settings.site_token,
+#         "ENABLE_FLEXIATTEND": getattr(settings, "enable_flexiattend", False),
+#         "MAX_ATTACHMENTS": getattr(settings, "maximum_file_attachments", 5),
+#         "ATTACHMENT_ENABLED": getattr(settings, "enable_attachment_feature_in_employee_checkin", False)
+#     }
 
-        if text == "/start":
-            bot.send_message(chat_id=chat_id, text="Hello! FlexiAttend Bot started ✅")
+# settings = get_erp_settings()
+# BOT_TOKEN = settings["BOT_TOKEN"]
+# SITE_TOKEN = settings["SITE_TOKEN"]
+# ENABLE_FLEXIATTEND = settings["ENABLE_FLEXIATTEND"]
+# MAX_ATTACHMENTS = settings["MAX_ATTACHMENTS"]
+# ATTACHMENT_ENABLED = settings["ATTACHMENT_ENABLED"]
 
-        return "OK"
-    except Exception as e:
-        # Log short error only
-        frappe.log_error(str(e)[:140], "FlexiAttend Bot")
-        return "Error"
+# VALIDATE_EMP_ENDPOINT = f"{settings['ERP_URL']}/api/method/flexiattend.triggers.api.validate_employee"
+# CREATE_CHECKIN_ENDPOINT = f"{settings['ERP_URL']}/api/method/flexiattend.triggers.api.create_employee_checkin"
+
+# bot = Bot(BOT_TOKEN)
+
+# # ---- CONVERSATION STATES ---- #
+# SITE_VERIFICATION, EMPLOYEE_ID, MENU, LOCATION = range(4)
+
+# # ---- DUMMY CONTEXT ---- #
+# class DummyContext:
+#     def __init__(self, bot):
+#         self.bot = bot
+#         self.user_data = {}
+
+# # ---- HANDLER FUNCTIONS ---- #
+# async def verify_site(update, context, user_data):
+#     await context.bot.send_message(update.message.chat.id, 
+#                                    "Enter your site token to verify your site:", 
+#                                    reply_markup=ReplyKeyboardRemove())
+#     user_data['state'] = SITE_VERIFICATION
+
+# async def check_site_code(update, context, user_data):
+#     code = update.message.text.strip()
+#     if code != SITE_TOKEN:
+#         await context.bot.send_message(update.message.chat.id, "❌ Invalid site code. Try again:")
+#         return
+#     await context.bot.send_message(update.message.chat.id, "✅ Site verified! Please enter your Employee ID:")
+#     user_data['state'] = EMPLOYEE_ID
+
+# async def get_employee_id(update, context, user_data):
+#     emp_id = update.message.text.strip()
+#     user_data['employee_id'] = emp_id
+#     try:
+#         r = requests.post(VALIDATE_EMP_ENDPOINT, data={"employee_id": emp_id})
+#         resp = r.json()
+#         status = resp.get("status") or resp.get("message", {}).get("status")
+#         if status != "success":
+#             await context.bot.send_message(update.message.chat.id, "❌ Employee not found. Enter again:")
+#             return
+#     except Exception as e:
+#         await context.bot.send_message(update.message.chat.id, f"⚠️ Error verifying employee: {str(e)}")
+#         return
+
+#     menu_keyboard = [["Check-In", "Check-Out"]]
+#     reply_markup = ReplyKeyboardMarkup(menu_keyboard, one_time_keyboard=True, resize_keyboard=True)
+#     await context.bot.send_message(update.message.chat.id, "✅ Employee verified. Choose an option:", reply_markup=reply_markup)
+#     user_data['state'] = MENU
+
+# async def menu_choice(update, context, user_data):
+#     choice = update.message.text
+#     if choice not in ["Check-In", "Check-Out"]:
+#         await context.bot.send_message(update.message.chat.id, "❌ Please use the buttons only.")
+#         return
+#     user_data['log_type'] = "IN" if choice == "Check-In" else "OUT"
+
+#     location_keyboard = [[KeyboardButton("Share Location 📍", request_location=True)]]
+#     reply_markup = ReplyKeyboardMarkup(location_keyboard, one_time_keyboard=True, resize_keyboard=True)
+#     await context.bot.send_message(update.message.chat.id, "Please share your location:", reply_markup=reply_markup)
+#     user_data['state'] = LOCATION
+
+# # ---- Attachments ---- #
+# async def handle_attachments(update, context, user_data):
+#     if not ATTACHMENT_ENABLED:
+#         await context.bot.send_message(update.message.chat.id, "⚠️ Attachment feature is disabled. File will not be saved.")
+#         return
+
+#     if "attachments" not in user_data:
+#         user_data["attachments"] = []
+
+#     current_count = len(user_data["attachments"])
+
+#     if update.message.document:
+#         if current_count >= MAX_ATTACHMENTS:
+#             await context.bot.send_message(update.message.chat.id, f"❌ Maximum {MAX_ATTACHMENTS} files allowed.")
+#             return
+#         doc = update.message.document
+#         user_data["attachments"].append({"file_id": doc.file_id, "file_name": doc.file_name})
+#         await context.bot.send_message(update.message.chat.id, f"✅ Document '{doc.file_name}' received.")
+#         return
+
+#     elif update.message.photo:
+#         if current_count >= MAX_ATTACHMENTS:
+#             await context.bot.send_message(update.message.chat.id, f"❌ Maximum {MAX_ATTACHMENTS} photos allowed.")
+#             return
+#         file_id = update.message.photo[-1].file_id
+#         file_name = f"photo_{current_count+1}.jpg"
+#         user_data["attachments"].append({"file_id": file_id, "file_name": file_name})
+#         await context.bot.send_message(update.message.chat.id, f"✅ Photo received ({current_count+1}/{MAX_ATTACHMENTS})")
+#         return
+
+#     else:
+#         await context.bot.send_message(update.message.chat.id, "❌ Unsupported attachment type.")
+
+# # ---- Location ---- #
+# async def location_handler(update, context, user_data):
+#     if not update.message.location:
+#         await context.bot.send_message(update.message.chat.id, "❌ Please share your location using the button.")
+#         return
+
+#     emp_id = user_data['employee_id']
+#     log_type = user_data['log_type']
+#     lat = update.message.location.latitude
+#     lon = update.message.location.longitude
+#     attachments = user_data.get("attachments", [])
+
+#     encoded_attachments = []
+#     for att in attachments:
+#         file_obj = await context.bot.get_file(att["file_id"])
+#         file_bytes = await file_obj.download_as_bytearray()
+#         encoded_attachments.append({
+#             "filename": att["file_name"],
+#             "filedata": base64.b64encode(file_bytes).decode()
+#         })
+
+#     payload = {
+#         "employee_id": emp_id,
+#         "log_type": log_type,
+#         "latitude": lat,
+#         "longitude": lon,
+#         "attachments": encoded_attachments
+#     }
+
+#     try:
+#         r = requests.post(CREATE_CHECKIN_ENDPOINT, json=payload)
+#         resp = r.json()
+#         status = resp.get("status") or resp.get("message", {}).get("status")
+#         message_text = resp.get("message") or resp.get("message", {}).get("message", "")
+#         if status == "success":
+#             await context.bot.send_message(update.message.chat.id, f"✅ {message_text}", reply_markup=ReplyKeyboardRemove())
+#         else:
+#             await context.bot.send_message(update.message.chat.id, f"❌ Failed: {message_text}", reply_markup=ReplyKeyboardRemove())
+#     except Exception as e:
+#         await context.bot.send_message(update.message.chat.id, f"⚠️ Error: {str(e)}", reply_markup=ReplyKeyboardRemove())
+
+#     user_data.clear()
+
+# # ---- Cancel ---- #
+# async def cancel(update, context, user_data):
+#     await context.bot.send_message(update.message.chat.id, "❌ Operation cancelled. You can start again with /start.", reply_markup=ReplyKeyboardRemove())
+#     user_data.clear()
+
+# # ---- Ignore unexpected ---- #
+# async def ignore_unexpected(update, context, user_data):
+#     if update.message and update.message.text != "/cancel":
+#         if user_data.get('log_type'):
+#             await context.bot.send_message(update.message.chat.id, "❌ Please share your location using the button.")
+#         else:
+#             await context.bot.send_message(update.message.chat.id, "❌ Please use the buttons only.")
+
+# import frappe
+# from telegram import Bot, Update
+# import json
+
+# @frappe.whitelist(allow_guest=True)
+# def webhook():
+#     try:
+#         update_json = frappe.local.form_dict
+#         # Keep only the message text and chat id for logging
+#         log_payload = {
+#             "chat_id": update_json.get("message", {}).get("chat", {}).get("id"),
+#             "text": update_json.get("message", {}).get("text")
+#         }
+#         frappe.log_error(f"Webhook payload: {json.dumps(log_payload)}", "FlexiAttend Bot Debug")
+
+#         # Initialize your bot
+#         bot = Bot("8466502184:AAFcBkWBFm31dqy-1iTZoILnX3YO59v65Qo")
+
+#         # Process Telegram update safely
+#         update = Update.de_json(update_json, bot)
+#         chat_id = update.message.chat.id
+#         text = update.message.text
+
+#         if text == "/start":
+#             bot.send_message(chat_id=chat_id, text="Hello! FlexiAttend Bot started ✅")
+
+#         return "OK"
+#     except Exception as e:
+#         # Log short error only
+#         frappe.log_error(str(e)[:140], "FlexiAttend Bot")
+#         return "Error"
 
 
 
