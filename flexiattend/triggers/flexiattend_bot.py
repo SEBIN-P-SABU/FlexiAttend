@@ -46,6 +46,7 @@ SITE_VERIFICATION, EMPLOYEE_ID, MENU, LOCATION = range(4)
 def _cache_key(chat_id: int) -> str:
     return f"flexiattend:tg:session:{str(chat_id)}"
 
+
 def _get_user_data(chat_id: int) -> dict:
     raw = frappe.cache().get_value(_cache_key(chat_id))
     if not raw:
