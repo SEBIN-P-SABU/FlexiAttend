@@ -245,6 +245,13 @@ if __name__ == "__main__":
 @frappe.whitelist(allow_guest=True)
 def webhook(**kwargs):
     """Telegram webhook entrypoint"""
+    
+    # Log the raw payload for debugging
+    frappe.log_error(
+        f"Webhook payload: {frappe.local.form_dict.get('update')}", 
+        "FlexiAttend Bot Debug"
+    )
+
     if not ENABLE_FLEXIATTEND:
         return "FlexiAttend Bot disabled"
 
