@@ -33,7 +33,7 @@ frappe.ui.form.on('FlexiAttend Settings', {
             },
             secondary_action_label: 'Discard',
             secondary_action() {
-                frappe.show_alert({message: __('Site Token generation cancelled'), indicator: 'red'});
+                frappe.show_alert({message: __('Site Token Generation Cancelled'), indicator: 'red'});
                 d.hide();
             }
         });
@@ -49,69 +49,71 @@ frappe.ui.form.on('FlexiAttend Settings', {
 
     refresh: function(frm) {
         // Update FlexiAttend Token button
-        frm.add_custom_button(__('Update FlexiAttend Token'), function() {
-            let d = new frappe.ui.Dialog({
-                title: `<span style="color:#721c24;">Update FlexiAttend Token</span>`,
-                fields: [
-                    {
-                        label: 'FlexiAttend Token',
-                        fieldname: 'flexiattend_token',
-                        fieldtype: 'Data',
-                        default: frm.doc.flexiattend_token || ''
-                    }
-                ],
-                primary_action_label: __('Update'),
-                primary_action(values) {
-                    frm.set_value('flexiattend_token', values.flexiattend_token);
-                    frm.save().then(() => {
-                        frappe.show_alert({message: __('FlexiAttend Token updated successfully'), indicator: 'blue'});
+        if (frm.doc.enable_flexiattend) {
+            frm.add_custom_button(__('Update FlexiAttend Token'), function() {
+                let d = new frappe.ui.Dialog({
+                    title: `<span style="color:#721c24;">Update FlexiAttend Token</span>`,
+                    fields: [
+                        {
+                            label: 'FlexiAttend Token',
+                            fieldname: 'flexiattend_token',
+                            fieldtype: 'Data',
+                            default: frm.doc.flexiattend_token || ''
+                        }
+                    ],
+                    primary_action_label: __('Update'),
+                    primary_action(values) {
+                        frm.set_value('flexiattend_token', values.flexiattend_token);
+                        frm.save().then(() => {
+                            frappe.show_alert({message: __('FlexiAttend Token updated successfully'), indicator: 'blue'});
+                            d.hide();
+                        });
+                    },
+                    secondary_action_label: __('Discard'),
+                    secondary_action() {
+                        frappe.show_alert({message: __('Updating FlexiAttend Token Cancelled'), indicator: 'red'});
                         d.hide();
-                    });
-                },
-                secondary_action_label: __('Discard'),
-                secondary_action() {
-                    frappe.show_alert({message: __('Updating FlexiAttend Token cancelled'), indicator: 'red'});
-                    d.hide();
+                    }
+                });
+
+                d.show();
+
+                setTimeout(() => {
+                    d.$wrapper.find('.modal-footer .btn-primary').css({'background-color': '#28a745','border-color': '#28a745','color': 'white'});
+                    d.$wrapper.find('.modal-footer .btn-secondary').css({'background-color': '#f8d7da','border-color': '#f8d7da','color': '#721c24'});
+                }, 100);
+            }, __('Actions'));
+
+            // Toggle Attachment Feature Button
+            const render_attachment_toggle = () => {
+                // Remove previous toggle button if exists
+                frm.page.remove_inner_button('Enable Attachment Feature in CheckIn');
+                frm.page.remove_inner_button('Disable Attachment Feature in CheckIn');
+
+                if (frm.doc.enable_attachment_feature_in_employee_checkin) {
+                    // Show Disable button
+                    frm.add_custom_button(__('Disable Attachment Feature in CheckIn'), () => {
+                        frm.set_value('enable_attachment_feature_in_employee_checkin', 0);
+                        frm.save().then(() => {
+                            frappe.show_alert({message: __('Attachment Feature Disabled in CheckIn'), indicator: 'red'});
+                            render_attachment_toggle();
+                        });
+                    }, __('Actions'));
+                } else {
+                    // Show Enable button
+                    frm.add_custom_button(__('Enable Attachment Feature in CheckIn'), () => {
+                        frm.set_value('enable_attachment_feature_in_employee_checkin', 1);
+                        frm.save().then(() => {
+                            frappe.show_alert({message: __('Attachment Feature Enabled in CheckIn'), indicator: 'green'});
+                            render_attachment_toggle();
+                        });
+                    }, __('Actions'));
                 }
-            });
+            };
 
-            d.show();
-
-            setTimeout(() => {
-                d.$wrapper.find('.modal-footer .btn-primary').css({'background-color': '#28a745','border-color': '#28a745','color': 'white'});
-                d.$wrapper.find('.modal-footer .btn-secondary').css({'background-color': '#f8d7da','border-color': '#f8d7da','color': '#721c24'});
-            }, 100);
-        }, __('Actions'));
-
-        // Toggle Attachment Feature Button
-        const render_attachment_toggle = () => {
-            // Remove previous toggle button if exists
-            frm.page.remove_inner_button('Enable Attachment Feature in CheckIn');
-            frm.page.remove_inner_button('Disable Attachment Feature in CheckIn');
-
-            if (frm.doc.enable_attachment_feature_in_employee_checkin) {
-                // Show Disable button
-                frm.add_custom_button(__('Disable Attachment Feature in CheckIn'), () => {
-                    frm.set_value('enable_attachment_feature_in_employee_checkin', 0);
-                    frm.save().then(() => {
-                        frappe.show_alert({message: __('Attachment Feature Disabled in CheckIn'), indicator: 'red'});
-                        render_attachment_toggle();
-                    });
-                }, __('Actions'));
-            } else {
-                // Show Enable button
-                frm.add_custom_button(__('Enable Attachment Feature in CheckIn'), () => {
-                    frm.set_value('enable_attachment_feature_in_employee_checkin', 1);
-                    frm.save().then(() => {
-                        frappe.show_alert({message: __('Attachment Feature Enabled in CheckIn'), indicator: 'green'});
-                        render_attachment_toggle();
-                    });
-                }, __('Actions'));
-            }
-        };
-
-        // Render the toggle button on refresh
-        render_attachment_toggle();
+            // Render the toggle button on refresh
+            render_attachment_toggle();
+        }
     },
 
     maximum_file_attachments: function(frm) {

@@ -18,7 +18,7 @@ def get_erp_settings():
     return {
         "BOT_TOKEN": settings.flexiattend_token,
         "ERP_URL": settings.erpnext_base_url,
-        "SITE_TOKEN": settings.site_token
+        "SITE_TOKEN": settings.site_token,
     }
 
 def get_endpoints():
@@ -29,6 +29,24 @@ def get_endpoints():
         "CREATE_CHECKIN_ENDPOINT": f"{ERP_URL}/api/method/flexiattend.triggers.api.create_employee_checkin"
     }
 
+# ---- BOT RUNNER ---- #
+def start_bot():
+    """Check if FlexiAttend is enabled, then run Telegram bot"""
+    try:
+        settings = frappe.get_single("FlexiAttend Settings")
+        if not getattr(settings, "enable_flexiattend", False):
+            frappe.log_error("FlexiAttend disabled. Bot not started.", "FlexiAttend Bot")
+            return
+
+        app = ApplicationBuilder().token(settings.flexiattend_token).build()
+
+        # Scheduler needs async start
+        asyncio.get_event_loop().create_task(app.run_polling())
+        frappe.log_error("FlexiAttend Bot started successfully.", "FlexiAttend Bot")
+
+    except Exception as e:
+        frappe.log_error(f"Failed to start FlexiAttend Bot: {str(e)}", "FlexiAttend Bot")
+        
 # ---- GLOBAL SETTINGS ---- #
 settings = get_erp_settings()
 BOT_TOKEN = settings["BOT_TOKEN"]
@@ -171,7 +189,7 @@ async def handle_attachments(update: Update, context: ContextTypes.DEFAULT_TYPE)
         context.user_data["attachments"] = []
 
     current_count = len(context.user_data["attachments"])
-    MAX_IMAGES = settings.maximum_file_attachments
+    MAX_IMAGES = getattr(settings, "maximum_file_attachments", 5)
 
     new_files = []
 
@@ -208,8 +226,6 @@ async def handle_attachments(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await update.message.reply_text("❌ Unsupported attachment type.")
 
 
-
-
 # 6️⃣ Cancel command
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("❌ Operation cancelled. You can start again with /start.", reply_markup=ReplyKeyboardRemove())
@@ -219,10 +235,10 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # 7️⃣ Ignore unexpected text (commented old validation for reference)
 async def ignore_unexpected(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message:
-        # # Old validation (commented)
+        # # Old validation (commented) this includes attachment validation.
         # if update.message:
         #     await update.message.reply_text("❌ Please use the buttons only.", reply_markup=ReplyKeyboardRemove())
-        # New logic: only warn if user types text instead of sharing location
+        # New logic: only warn if user types text instead of sharing location - this allows attachments if it's enabbled
         if context.user_data.get('log_type') and update.message.text != "/cancel":
             await update.message.reply_text("❌ Please share your location using the button.")
         else:
@@ -232,7 +248,7 @@ async def ignore_unexpected(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def set_commands_on_startup(app):
     await app.bot.set_my_commands([
         BotCommand("start", "Start the FlexiAttend Bot"),
-        BotCommand("cancel", "Cancel current operation")
+        BotCommand("cancel", "Cancel Current Operation")
     ])
 
 app = ApplicationBuilder().token(BOT_TOKEN).post_init(set_commands_on_startup).build()
