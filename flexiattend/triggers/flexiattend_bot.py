@@ -14,6 +14,8 @@ import json
 
 # ---- HELPER FUNCTIONS ---- #
 def get_erp_settings():
+    # Use guest session to prevent SessionStopped
+    frappe.set_user("Guest")
     settings = frappe.get_single("FlexiAttend Settings")
     return {
         "BOT_TOKEN": settings.flexiattend_token,
@@ -47,10 +49,9 @@ class DummyContext:
 
 # ---- HANDLER FUNCTIONS ---- #
 async def verify_site(update, context, user_data):
-    if not ENABLE_FLEXIATTEND:
-        await context.bot.send_message(update.message.chat.id, "❌ FlexiAttend Bot is currently disabled. Please contact admin.")
-        return
-    await context.bot.send_message(update.message.chat.id, "Enter your site token to verify your site:", reply_markup=ReplyKeyboardRemove())
+    await context.bot.send_message(update.message.chat.id, 
+                                   "Enter your site token to verify your site:", 
+                                   reply_markup=ReplyKeyboardRemove())
     user_data['state'] = SITE_VERIFICATION
 
 async def check_site_code(update, context, user_data):
@@ -64,7 +65,6 @@ async def check_site_code(update, context, user_data):
 async def get_employee_id(update, context, user_data):
     emp_id = update.message.text.strip()
     user_data['employee_id'] = emp_id
-
     try:
         r = requests.post(VALIDATE_EMP_ENDPOINT, data={"employee_id": emp_id})
         resp = r.json()
@@ -104,7 +104,6 @@ async def handle_attachments(update, context, user_data):
 
     current_count = len(user_data["attachments"])
 
-    # Documents
     if update.message.document:
         if current_count >= MAX_ATTACHMENTS:
             await context.bot.send_message(update.message.chat.id, f"❌ Maximum {MAX_ATTACHMENTS} files allowed.")
@@ -114,7 +113,6 @@ async def handle_attachments(update, context, user_data):
         await context.bot.send_message(update.message.chat.id, f"✅ Document '{doc.file_name}' received.")
         return
 
-    # Photos
     elif update.message.photo:
         if current_count >= MAX_ATTACHMENTS:
             await context.bot.send_message(update.message.chat.id, f"❌ Maximum {MAX_ATTACHMENTS} photos allowed.")
@@ -195,12 +193,17 @@ def webhook(**kwargs):
     if not raw_update:
         return "No update"
 
-    if not hasattr(frappe.local, "user_data_store"):
-        frappe.local.user_data_store = {}
-
     try:
         update = Update.de_json(json.loads(raw_update), bot=bot)
+
+        # Ignore updates without message
+        if not hasattr(update, "message") or not update.message:
+            frappe.log_error(f"Update without message: {raw_update}", "FlexiAttend Bot Debug")
+            return "No message to process"
+
         chat_id = update.message.chat.id
+        if not hasattr(frappe.local, "user_data_store"):
+            frappe.local.user_data_store = {}
         user_data = frappe.local.user_data_store.setdefault(chat_id, {})
         context = DummyContext(bot)
 
@@ -235,6 +238,7 @@ def webhook(**kwargs):
     except Exception as e:
         frappe.log_error(f"Webhook error: {str(e)}", "FlexiAttend Bot")
         return "Error"
+
 
 
 
