@@ -44,7 +44,7 @@ SITE_VERIFICATION, EMPLOYEE_ID, MENU, LOCATION = range(4)
 # Cache-backed session (persists across requests)
 # ----------------------------
 def _cache_key(chat_id: int) -> str:
-    return f"flexiattend:tg:session:{chat_id}"
+    return f"flexiattend:tg:session:{str(chat_id)}"
 
 def _get_user_data(chat_id: int) -> dict:
     raw = frappe.cache().get_value(_cache_key(chat_id))
@@ -93,6 +93,7 @@ async def _fetch_file_base64(file_id: str) -> str:
 # Async handlers (mirror POLLING flow)
 # ----------------------------
 async def h_verify_site(update: Update, user_data: dict, chat_id: int):
+    user_data = user_data or {}
     user_data["state"] = SITE_VERIFICATION
     _save_user_data(chat_id, user_data)
     await update.message.reply_text(
@@ -279,7 +280,13 @@ def webhook():
 
         update = Update.de_json(update_json, bot)
         user_data = _get_user_data(chat_id)
+
+        # If nothing in cache yet, initialize
+        if not user_data:
+            user_data = {}
+
         state = user_data.get("state")
+
         loop = _ensure_event_loop()
 
         # Commands available anytime
