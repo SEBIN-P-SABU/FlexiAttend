@@ -182,71 +182,36 @@ async def ignore_unexpected(update, context, user_data):
         else:
             await context.bot.send_message(update.message.chat.id, "❌ Please use the buttons only.")
 
-# ---- WEBHOOK ENTRYPOINT ---- #
+import frappe
+from telegram import Bot, Update
+import json
+
 @frappe.whitelist(allow_guest=True)
 def webhook():
-    """
-    Receives raw JSON POST from Telegram and passes it to the bot handlers.
-    """
-    import json
-    import asyncio
-    from telegram import Update
-
-    if not ENABLE_FLEXIATTEND:
-        return "FlexiAttend Bot disabled"
-
     try:
-        # Read raw JSON from request body
-        raw_update = frappe.local.request.get_data(as_text=True)
-        if not raw_update:
-            frappe.log_error(f"Webhook payload: None", "FlexiAttend Bot Debug")
-            return "No update"
+        update_json = frappe.local.form_dict
+        # Keep only the message text and chat id for logging
+        log_payload = {
+            "chat_id": update_json.get("message", {}).get("chat", {}).get("id"),
+            "text": update_json.get("message", {}).get("text")
+        }
+        frappe.log_error(f"Webhook payload: {json.dumps(log_payload)}", "FlexiAttend Bot Debug")
 
-        update_json = json.loads(raw_update)
+        # Initialize your bot
+        bot = Bot("8466502184:AAFcBkWBFm31dqy-1iTZoILnX3YO59v65Qo")
 
-        # Log payload for debug
-        frappe.log_error(f"Webhook payload: {update_json}", "FlexiAttend Bot Debug")
-
-        # Convert to Telegram Update object
-        update = Update.de_json(update_json, bot=bot)
-
-        # Get chat_id and user_data storage
+        # Process Telegram update safely
+        update = Update.de_json(update_json, bot)
         chat_id = update.message.chat.id
-        if not hasattr(frappe.local, "user_data_store"):
-            frappe.local.user_data_store = {}
-        user_data = frappe.local.user_data_store.setdefault(chat_id, {})
-        context = DummyContext(bot)
+        text = update.message.text
 
-        # Async loop
-        loop = asyncio.get_event_loop()
-        state = user_data.get('state')
-
-        # Handle commands /start and /cancel
-        if update.message.text == "/cancel":
-            loop.run_until_complete(cancel(update, context, user_data))
-        elif update.message.text == "/start":
-            loop.run_until_complete(verify_site(update, context, user_data))
-        # Handle location/attachments
-        elif state == LOCATION:
-            if update.message.location:
-                loop.run_until_complete(location_handler(update, context, user_data))
-            else:
-                loop.run_until_complete(handle_attachments(update, context, user_data))
-        # Handle MENU and EMPLOYEE_ID states
-        elif state == MENU:
-            loop.run_until_complete(menu_choice(update, context, user_data))
-        elif state == EMPLOYEE_ID:
-            loop.run_until_complete(get_employee_id(update, context, user_data))
-        elif state == SITE_VERIFICATION:
-            loop.run_until_complete(check_site_code(update, context, user_data))
-        # Fallback for unexpected messages
-        else:
-            loop.run_until_complete(ignore_unexpected(update, context, user_data))
+        if text == "/start":
+            bot.send_message(chat_id=chat_id, text="Hello! FlexiAttend Bot started ✅")
 
         return "OK"
-
     except Exception as e:
-        frappe.log_error(f"Webhook error: {str(e)}", "FlexiAttend Bot")
+        # Log short error only
+        frappe.log_error(str(e)[:140], "FlexiAttend Bot")
         return "Error"
 
 
