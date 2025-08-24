@@ -1,193 +1,187 @@
 # Copyright (c) 2025, Sebin P Sabu and contributors
 # For license information, please see license.txt
 
-import frappe
+
+# Copyright (c) 2025, Sebin P Sabu and contributors
+# For license information, please see license.txt
+
 import json
 import asyncio
 import base64
 import requests
+import frappe
 from telegram import Bot, Update, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
 
-# ---- GLOBAL SETTINGS ---- #
+# ----------------------------
+# Settings & Globals
+# ----------------------------
 def get_erp_settings():
     settings = frappe.get_single("FlexiAttend Settings")
     return {
+        "ENABLE_FLEXIATTEND": getattr(settings, "enable_flexiattend", False),
         "BOT_TOKEN": settings.flexiattend_token,
         "ERP_URL": settings.erpnext_base_url,
         "SITE_TOKEN": settings.site_token,
         "ATTACHMENTS_ENABLED": getattr(settings, "enable_attachment_feature_in_employee_checkin", False),
-        "MAX_ATTACHMENTS": getattr(settings, "maximum_file_attachments", 5)
+        "MAX_ATTACHMENTS": getattr(settings, "maximum_file_attachments", 5),
     }
 
-settings = get_erp_settings()
-BOT_TOKEN = settings["BOT_TOKEN"]
-SITE_TOKEN = settings["SITE_TOKEN"]
-ATTACHMENTS_ENABLED = settings["ATTACHMENTS_ENABLED"]
-MAX_ATTACHMENTS = settings["MAX_ATTACHMENTS"]
+_settings = get_erp_settings()
+ENABLE_FLEXIATTEND = _settings["ENABLE_FLEXIATTEND"]
+BOT_TOKEN = _settings["BOT_TOKEN"]
+SITE_TOKEN = _settings["SITE_TOKEN"]
+ATTACHMENTS_ENABLED = _settings["ATTACHMENTS_ENABLED"]
+MAX_ATTACHMENTS = _settings["MAX_ATTACHMENTS"]
+
 bot = Bot(BOT_TOKEN)
 
-endpoints = {
-    "VALIDATE_EMP_ENDPOINT": f"{settings['ERP_URL']}/api/method/flexiattend.triggers.api.validate_employee",
-    "CREATE_CHECKIN_ENDPOINT": f"{settings['ERP_URL']}/api/method/flexiattend.triggers.api.create_employee_checkin"
+ENDPOINTS = {
+    "VALIDATE_EMP_ENDPOINT": f"{_settings['ERP_URL']}/api/method/flexiattend.triggers.api.validate_employee",
+    "CREATE_CHECKIN_ENDPOINT": f"{_settings['ERP_URL']}/api/method/flexiattend.triggers.api.create_employee_checkin",
 }
 
-# ---- CONVERSATION STATES ---- #
+# Conversation states
 SITE_VERIFICATION, EMPLOYEE_ID, MENU, LOCATION = range(4)
 
-# ---- HELPER FUNCTIONS ---- #
-def get_user_data(chat_id):
-    """Return user session data stored in frappe.local."""
+
+# ----------------------------
+# Small helpers
+# ----------------------------
+def _ensure_event_loop():
+    """Return a running event loop (create one if we're in a worker thread)."""
+    try:
+        loop = asyncio.get_event_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+    return loop
+
+def _get_user_data(chat_id: int) -> dict:
+    """Per-chat session store attached to frappe.local."""
     if not hasattr(frappe.local, "user_data_store"):
         frappe.local.user_data_store = {}
     return frappe.local.user_data_store.setdefault(chat_id, {})
 
-async def fetch_file_base64(file_id):
-    """Download a Telegram file and return as base64 string."""
+def _safe_log(message: str, title: str):
+    """Avoid Frappe 'Title too long' by truncating title; keep message concise."""
+    try:
+        frappe.log_error(message=message[:4000], title=title[:120])
+    except Exception:
+        # As a last resort, don't let logging crash the webhook
+        pass
+
+
+# ----------------------------
+# Async helpers
+# ----------------------------
+async def _fetch_file_base64(file_id: str) -> str:
+    """Download a Telegram file & return base64 string."""
     file_obj = await bot.get_file(file_id)
     file_bytes = await file_obj.download_as_bytearray()
     return base64.b64encode(file_bytes).decode()
 
-# ---- WEBHOOK ---- #
-@frappe.whitelist(allow_guest=True)
-def webhook():
-    try:
-        raw_update = frappe.local.request.get_data(as_text=True)
-        if not raw_update:
-            return "No update"
 
-        update_json = json.loads(raw_update)
-        chat_id = update_json.get("message", {}).get("chat", {}).get("id")
-        text = update_json.get("message", {}).get("text")
-        frappe.log_error(f"Webhook payload: {{'chat_id': {chat_id}, 'text': '{text}'}}", "FlexiAttend Bot Debug")
-
-        update = Update.de_json(update_json, bot)
-        user_data = get_user_data(chat_id)
-        state = user_data.get("state")
-        loop = asyncio.get_event_loop()
-
-        # Command: /cancel
-        if text == "/cancel":
-            return loop.run_until_complete(cancel(update, user_data))
-
-        # Command: /start
-        elif text == "/start":
-            return loop.run_until_complete(verify_site(update, user_data))
-
-        # SITE VERIFICATION
-        elif state == SITE_VERIFICATION:
-            return loop.run_until_complete(check_site_code(update, user_data))
-
-        # EMPLOYEE ID
-        elif state == EMPLOYEE_ID:
-            return loop.run_until_complete(get_employee_id(update, user_data))
-
-        # MENU CHOICE
-        elif state == MENU:
-            return loop.run_until_complete(menu_choice(update, user_data))
-
-        # LOCATION / ATTACHMENTS
-        elif state == LOCATION:
-            if update.message.location:
-                return loop.run_until_complete(location_handler(update, user_data))
-            else:
-                return loop.run_until_complete(handle_attachments(update, user_data))
-
-        # FALLBACK
-        else:
-            return loop.run_until_complete(ignore_unexpected(update, user_data))
-
-    except Exception as e:
-        frappe.log_error(str(e)[:140], "FlexiAttend Bot")
-        return "Error"
-
-# ---- HANDLER FUNCTIONS ---- #
-async def verify_site(update, user_data):
-    user_data['state'] = SITE_VERIFICATION
+# ----------------------------
+# Async handlers (mirror polling flow)
+# ----------------------------
+async def h_verify_site(update: Update, user_data: dict):
+    user_data["state"] = SITE_VERIFICATION
     await update.message.reply_text(
         "Enter your site code to verify your site:",
-        reply_markup=ReplyKeyboardRemove()
+        reply_markup=ReplyKeyboardRemove(),
     )
     return SITE_VERIFICATION
 
-async def check_site_code(update, user_data):
-    code = update.message.text.strip()
+async def h_check_site_code(update: Update, user_data: dict):
+    code = (update.message.text or "").strip()
     if code != SITE_TOKEN:
         await update.message.reply_text("❌ Invalid site code. Try again:")
+        user_data["state"] = SITE_VERIFICATION
         return SITE_VERIFICATION
-    user_data['state'] = EMPLOYEE_ID
+
+    user_data["state"] = EMPLOYEE_ID
     await update.message.reply_text("✅ Site verified! Please enter your Employee ID:")
     return EMPLOYEE_ID
 
-async def get_employee_id(update, user_data):
-    emp_id = update.message.text.strip()
-    user_data['employee_id'] = emp_id
+async def h_get_employee_id(update: Update, user_data: dict):
+    emp_id = (update.message.text or "").strip()
+    user_data["employee_id"] = emp_id
+
     try:
-        r = requests.post(endpoints["VALIDATE_EMP_ENDPOINT"], data={"employee_id": emp_id})
+        r = requests.post(ENDPOINTS["VALIDATE_EMP_ENDPOINT"], data={"employee_id": emp_id}, timeout=15)
         resp = r.json()
-        status = resp.get("status") or resp.get("message", {}).get("status")
+        status = resp.get("status") or (resp.get("message") or {}).get("status")
         if status != "success":
             await update.message.reply_text("❌ Employee not found. Enter again:")
+            user_data["state"] = EMPLOYEE_ID
             return EMPLOYEE_ID
     except Exception as e:
         await update.message.reply_text(f"⚠️ Error verifying employee: {str(e)}")
+        user_data["state"] = EMPLOYEE_ID
         return EMPLOYEE_ID
 
-    user_data['state'] = MENU
+    # Show menu
     keyboard = [["Check-In", "Check-Out"]]
-    reply_markup = ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True)
-    await update.message.reply_text("✅ Employee verified. Choose an option:", reply_markup=reply_markup)
+    markup = ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True)
+    user_data["state"] = MENU
+    await update.message.reply_text("✅ Employee verified. Choose an option:", reply_markup=markup)
     return MENU
 
-async def menu_choice(update, user_data):
-    choice = update.message.text
+async def h_menu_choice(update: Update, user_data: dict):
+    choice = (update.message.text or "").strip()
     if choice not in ["Check-In", "Check-Out"]:
         await update.message.reply_text("❌ Please use the buttons only.")
+        user_data["state"] = MENU
         return MENU
-    user_data['log_type'] = "IN" if choice == "Check-In" else "OUT"
-    user_data['state'] = LOCATION
+
+    user_data["log_type"] = "IN" if choice == "Check-In" else "OUT"
+    user_data["state"] = LOCATION
+
+    # Ask for location
     keyboard = [[KeyboardButton("Share Location 📍", request_location=True)]]
-    reply_markup = ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True)
-    await update.message.reply_text("Please share your location:", reply_markup=reply_markup)
+    markup = ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True)
+    await update.message.reply_text("Please share your location:", reply_markup=markup)
     return LOCATION
 
-async def location_handler(update, user_data):
+async def h_location_handler(update: Update, user_data: dict):
     if not update.message.location:
         await update.message.reply_text("❌ Please share your location using the button.")
+        user_data["state"] = LOCATION
         return LOCATION
 
-    # Prepare attachments in base64
-    attachments = []
+    # Prepare attachments (if any)
+    attachments_payload = []
     for att in user_data.get("attachments", []):
         try:
-            encoded = await fetch_file_base64(att["file_id"])
-            attachments.append({"filename": att["file_name"], "filedata": encoded})
+            encoded = await _fetch_file_base64(att["file_id"])
+            attachments_payload.append({"filename": att["file_name"], "filedata": encoded})
         except Exception as e:
-            frappe.log_error(f"Failed to fetch attachment: {str(e)}", "FlexiAttend Bot Debug")
+            _safe_log(f"Attachment fetch failed: {str(e)}", "FlexiAttend Bot Debug")
 
     payload = {
-        "employee_id": user_data['employee_id'],
-        "log_type": user_data['log_type'],
+        "employee_id": user_data["employee_id"],
+        "log_type": user_data["log_type"],
         "latitude": update.message.location.latitude,
         "longitude": update.message.location.longitude,
-        "attachments": attachments
+        "attachments": attachments_payload,
     }
 
     try:
-        r = requests.post(endpoints["CREATE_CHECKIN_ENDPOINT"], json=payload)
+        r = requests.post(ENDPOINTS["CREATE_CHECKIN_ENDPOINT"], json=payload, timeout=20)
         resp = r.json()
-        msg = resp.get("message", "")
-        status = resp.get("status", "error")
+        status = resp.get("status") or (resp.get("message") or {}).get("status")
+        message_text = resp.get("message") or (resp.get("message") or {}).get("message", "")
         if status == "success":
-            await update.message.reply_text(f"✅ {msg}", reply_markup=ReplyKeyboardRemove())
+            await update.message.reply_text(f"✅ {message_text}", reply_markup=ReplyKeyboardRemove())
         else:
-            await update.message.reply_text(f"❌ Failed: {msg}", reply_markup=ReplyKeyboardRemove())
+            await update.message.reply_text(f"❌ Failed: {message_text}", reply_markup=ReplyKeyboardRemove())
     except Exception as e:
         await update.message.reply_text(f"⚠️ Error: {str(e)}", reply_markup=ReplyKeyboardRemove())
 
     user_data.clear()
     return "END"
 
-async def handle_attachments(update, user_data):
+async def h_handle_attachments(update: Update, user_data: dict):
     if not ATTACHMENTS_ENABLED:
         await update.message.reply_text("⚠️ Attachment feature is disabled.")
         return
@@ -204,22 +198,99 @@ async def handle_attachments(update, user_data):
         doc = update.message.document
         user_data["attachments"].append({"file_id": doc.file_id, "file_name": doc.file_name})
         await update.message.reply_text(f"✅ Document '{doc.file_name}' received and will be attached.")
-
     elif update.message.photo:
-        file_id = update.message.photo[-1].file_id
+        file_id = update.message.photo[-1].file_id  # highest resolution
         user_data["attachments"].append({"file_id": file_id, "file_name": f"photo_{count+1}.jpg"})
         await update.message.reply_text(f"✅ Photo received and will be attached ({count+1}/{MAX_ATTACHMENTS})")
-
     else:
         await update.message.reply_text("❌ Unsupported attachment type.")
 
-async def cancel(update, user_data):
+async def h_cancel(update: Update, user_data: dict):
     await update.message.reply_text("❌ Operation cancelled. Start again with /start.", reply_markup=ReplyKeyboardRemove())
     user_data.clear()
     return "END"
 
-async def ignore_unexpected(update, user_data):
+async def h_ignore_unexpected(update: Update, user_data: dict):
+    # If user is in location step but typed text, hint about location button.
+    if user_data.get("state") == LOCATION and not update.message.location and (update.message.text or "") != "/cancel":
+        await update.message.reply_text("❌ Please share your location using the button.")
+        return
     await update.message.reply_text("❌ Please use the buttons only.")
+
+
+# ----------------------------
+# Webhook entrypoint
+# ----------------------------
+@frappe.whitelist(allow_guest=True)
+def webhook():
+    if not ENABLE_FLEXIATTEND:
+        return "FlexiAttend Bot disabled"
+
+    try:
+        # Telegram sends JSON body; read it raw
+        raw_update = frappe.local.request.get_data(as_text=True)
+        if not raw_update:
+            return "No update"
+
+        update_json = json.loads(raw_update)
+
+        # Only handle message updates
+        message = update_json.get("message")
+        if not message:
+            return "Ignored"
+
+        chat = message.get("chat") or {}
+        chat_id = chat.get("id")
+        text = message.get("text")
+
+        # Safe debug log
+        _safe_log(
+            message=json.dumps({"chat_id": chat_id, "text": text}) if chat_id else "No chat_id",
+            title="FlexiAttend Bot Debug",
+        )
+
+        # Create Telegram Update and session
+        update = Update.de_json(update_json, bot)
+        user_data = _get_user_data(chat_id)
+        state = user_data.get("state")
+
+        loop = _ensure_event_loop()
+
+        # Commands that work anytime
+        if text == "/cancel":
+            return loop.run_until_complete(h_cancel(update, user_data))
+        if text == "/start":
+            return loop.run_until_complete(h_verify_site(update, user_data))
+
+        # State routing
+        if state == SITE_VERIFICATION and text:
+            return loop.run_until_complete(h_check_site_code(update, user_data))
+        elif state == EMPLOYEE_ID and text:
+            return loop.run_until_complete(h_get_employee_id(update, user_data))
+        elif state == MENU and text:
+            return loop.run_until_complete(h_menu_choice(update, user_data))
+        elif state == LOCATION:
+            if update.message.location:
+                return loop.run_until_complete(h_location_handler(update, user_data))
+            else:
+                # Accept attachments during LOCATION step
+                return loop.run_until_complete(h_handle_attachments(update, user_data))
+        else:
+            # Unknown context → gentle nudge
+            return loop.run_until_complete(h_ignore_unexpected(update, user_data))
+
+    except Exception as e:
+        _safe_log(str(e), "FlexiAttend Bot")
+        return "Error"
+
+    
+    
+    
+    
+    
+    
+    
+    
 
 
 ################ WORKED WEBHOOK CODE ########################
