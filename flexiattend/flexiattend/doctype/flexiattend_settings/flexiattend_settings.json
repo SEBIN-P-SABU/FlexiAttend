@@ -8,12 +8,14 @@
   "enable_flexiattend",
   "basic_configurations_section",
   "flexiattend_token",
-  "integrating_user",
-  "enable_attachment_feature_in_employee_checkin",
+  "generate_site_token",
   "column_break_cnnd",
   "erpnext_base_url",
-  "generate_site_token",
-  "site_token"
+  "site_token",
+  "attachment_settings_section",
+  "enable_attachment_feature_in_employee_checkin",
+  "column_break_jpxd",
+  "maximum_file_attachments"
  ],
  "fields": [
   {
@@ -25,12 +27,6 @@
   {
    "fieldname": "column_break_cnnd",
    "fieldtype": "Column Break"
-  },
-  {
-   "fieldname": "integrating_user",
-   "fieldtype": "Link",
-   "label": "Integrating User",
-   "options": "User"
   },
   {
    "fieldname": "erpnext_base_url",
@@ -69,13 +65,32 @@
    "fieldtype": "Check",
    "label": "Enable Attachment Feature in CheckIn",
    "read_only": 1
+  },
+  {
+   "default": "5",
+   "depends_on": "eval: doc.enable_attachment_feature_in_employee_checkin == 1;",
+   "description": "*Only JPG, JPEG, XLSX, CSV, and PDF file formats are allowed. MP4 and GIF (video files) are not supported.\n<br>*Max allowed limit = 10",
+   "fieldname": "maximum_file_attachments",
+   "fieldtype": "Int",
+   "label": "Maximum File Attachments",
+   "mandatory_depends_on": "eval: doc.enable_attachment_feature_in_employee_checkin == 1;"
+  },
+  {
+   "depends_on": "eval:doc.enable_flexiattend && doc.enable_attachment_feature_in_employee_checkin == 1",
+   "fieldname": "attachment_settings_section",
+   "fieldtype": "Section Break",
+   "label": "Attachment Settings"
+  },
+  {
+   "fieldname": "column_break_jpxd",
+   "fieldtype": "Column Break"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2025-08-17 12:25:29.622579",
+ "modified": "2025-08-24 05:48:53.235999",
  "modified_by": "Administrator",
  "module": "FlexiAttend",
  "name": "FlexiAttend Settings",

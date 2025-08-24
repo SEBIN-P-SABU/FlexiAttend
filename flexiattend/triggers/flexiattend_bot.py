@@ -160,17 +160,18 @@ async def location_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # 5️⃣ Capture attachments during the process
 async def handle_attachments(update: Update, context: ContextTypes.DEFAULT_TYPE):
     settings = frappe.get_single("FlexiAttend Settings")
-    attachments_enabled = getattr(settings, "enable_attachment_feature_in_checkin", False)
+    attachments_enabled = getattr(settings, "enable_attachment_feature_in_employee_checkin", False)
 
     if not attachments_enabled:
         await update.message.reply_text("⚠️ Attachment feature is disabled. File will not be saved.")
+        print(f"[INFO] ⚠️ Attachment feature is disabled. File will not be saved.")
         return
 
     if "attachments" not in context.user_data:
         context.user_data["attachments"] = []
 
     current_count = len(context.user_data["attachments"])
-    MAX_IMAGES = 3
+    MAX_IMAGES = settings.maximum_file_attachments
 
     new_files = []
 
@@ -259,3 +260,103 @@ app.add_handler(conv_handler)
 if __name__ == "__main__":
     asyncio.run(set_commands_on_startup(app))
     app.run_polling()
+
+
+
+
+
+
+
+
+
+
+
+###########################
+
+# import frappe
+# import requests
+# import logging
+# from telegram import Update, ReplyKeyboardMarkup
+# from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
+
+# logging.basicConfig(level=logging.INFO)
+# logger = logging.getLogger(__name__)
+
+# # ----------------------------
+# # Helpers
+# # ----------------------------
+
+# def get_flexiattend_settings():
+#     """Fetch latest FlexiAttend Settings from ERPNext"""
+#     settings = frappe.get_single("FlexiAttend Settings")
+#     return {
+#         "enabled": settings.enable_flexiattend,
+#         "bot_token": settings.flexiattend_token,
+#         "base_url": settings.erpnext_base_url.strip("/") if settings.erpnext_base_url else "",
+#         "site_token": settings.site_token
+#     }
+
+# async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+#     await update.message.reply_text(
+#         "👋 Welcome to FlexiAttend Bot!\n\nPlease enter your *Site Code* to verify.",
+#         parse_mode="Markdown"
+#     )
+
+# async def verify_site(update: Update, context: ContextTypes.DEFAULT_TYPE):
+#     site_code = update.message.text.strip()
+#     settings = get_flexiattend_settings()
+
+#     if not settings["site_token"]:
+#         await update.message.reply_text("⚠️ Site Token not configured in FlexiAttend Settings.")
+#         return
+
+#     if site_code == settings["site_token"]:
+#         await update.message.reply_text("✅ Site verified! Now enter your *Employee ID* to continue.", parse_mode="Markdown")
+#         context.user_data["site_verified"] = True
+#     else:
+#         await update.message.reply_text("❌ Invalid site code. Try again:")
+
+# async def verify_employee(update: Update, context: ContextTypes.DEFAULT_TYPE):
+#     if not context.user_data.get("site_verified"):
+#         await update.message.reply_text("⚠️ Please verify your site code first.")
+#         return
+
+#     employee_id = update.message.text.strip()
+#     settings = get_flexiattend_settings()
+
+#     try:
+#         url = f"{settings['base_url']}/api/method/flexiattend.triggers.api.validate_employee"
+#         headers = {"Authorization": f"token {settings['site_token']}"}
+#         res = requests.post(url, headers=headers, json={"employee_id": employee_id}, timeout=10)
+
+#         if res.status_code == 200 and res.json().get("message") == "success":
+#             await update.message.reply_text("✅ Employee verified! You can now use FlexiAttend features.")
+#         else:
+#             await update.message.reply_text("❌ Employee verification failed. Try again.")
+#     except Exception as e:
+#         logger.error(f"Error verifying employee: {e}")
+#         await update.message.reply_text(f"⚠️ Error verifying employee: {e}")
+
+# # ----------------------------
+# # Main Bot Runner
+# # ----------------------------
+
+# def run_flexiattend_bot():
+#     settings = get_flexiattend_settings()
+
+#     if not settings["enabled"]:
+#         logger.warning("⚠️ FlexiAttend Bot is disabled in settings.")
+#         return
+
+#     if not settings["bot_token"]:
+#         logger.error("❌ Bot token missing in FlexiAttend Settings.")
+#         return
+
+#     application = ApplicationBuilder().token(settings["bot_token"]).build()
+
+#     application.add_handler(CommandHandler("start", start))
+#     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, verify_site))
+#     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, verify_employee))
+
+#     logger.info("🚀 FlexiAttend Bot started...")
+#     application.run_polling()

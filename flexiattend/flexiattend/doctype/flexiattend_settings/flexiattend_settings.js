@@ -94,7 +94,7 @@ frappe.ui.form.on('FlexiAttend Settings', {
                 frm.add_custom_button(__('Disable Attachment Feature in CheckIn'), () => {
                     frm.set_value('enable_attachment_feature_in_employee_checkin', 0);
                     frm.save().then(() => {
-                        frappe.show_alert({message: __('Attachment Feature disabled in CheckIn'), indicator: 'red'});
+                        frappe.show_alert({message: __('Attachment Feature Disabled in CheckIn'), indicator: 'red'});
                         render_attachment_toggle();
                     });
                 }, __('Actions'));
@@ -103,7 +103,7 @@ frappe.ui.form.on('FlexiAttend Settings', {
                 frm.add_custom_button(__('Enable Attachment Feature in CheckIn'), () => {
                     frm.set_value('enable_attachment_feature_in_employee_checkin', 1);
                     frm.save().then(() => {
-                        frappe.show_alert({message: __('Attachment Feature enabled in CheckIn'), indicator: 'green'});
+                        frappe.show_alert({message: __('Attachment Feature Enabled in CheckIn'), indicator: 'green'});
                         render_attachment_toggle();
                     });
                 }, __('Actions'));
@@ -112,5 +112,18 @@ frappe.ui.form.on('FlexiAttend Settings', {
 
         // Render the toggle button on refresh
         render_attachment_toggle();
+    },
+
+    maximum_file_attachments: function(frm) {
+        const value = frm.doc.maximum_file_attachments;
+
+        if (value <= 0) {
+            frappe.msgprint(__('Maximum File Attachments must be greater than 0. Resetting to default (5).'));
+            frm.set_value("maximum_file_attachments", 5);
+        } 
+        else if (value > 10) {
+            frappe.msgprint(__('Maximum File Attachments cannot exceed 10. Resetting to default (5).'));
+            frm.set_value("maximum_file_attachments", 5);
+        }
     }
 });
